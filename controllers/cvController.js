@@ -1,0 +1,259 @@
+const { Student } = require('../models');
+const fs = require('fs');
+const path = require('path');
+// ⚠️ Corrige le chemin du dossier uploads
+const UPLOADS_DIR = path.join(__dirname, '../uploads/cvs');
+
+
+// @desc    Générer CV à partir des données du profil
+// @route   POST /api/students/generate-cv
+const generateStudentCV = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) {
+      return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+    }
+    
+    const {
+      nom,
+      prenom,
+      email,
+      telephone,
+      adresse,
+      universite,
+      filiere,
+      niveau,
+      competences,
+      experiences,
+      formations,
+      langues,
+      centresInteret
+    } = req.body;
+    
+    // Utiliser les données du profil ou celles envoyées
+    const finalData = {
+      nom: nom || student.nom,
+      prenom: prenom || student.prenom,
+      email: email || student.email,
+      telephone: telephone || student.telephone,
+      adresse: adresse || student.adresse,
+      universite: universite || student.universite,
+      filiere: filiere || student.filiere,
+      niveau: niveau || student.niveau,
+      competences: competences || (student.competences ? JSON.parse(student.competences) : []),
+      experiences: experiences || [],
+      formations: formations || [],
+      langues: langues || [],
+      centresInteret: centresInteret || []
+    };
+    
+    // Générer le PDF
+    const PDFDocument = require('pdfkit');
+    const { Buffer } = require('buffer');
+    
+    const doc = new PDFDocument({ margin: 50 });
+    const buffers = [];
+    
+    doc.on('data', buffers.push.bind(buffers));
+    doc.on('end', () => {
+      const pdfData = Buffer.concat(buffers);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=CV_${finalData.nom}_${finalData.prenom}.pdf`);
+      res.send(pdfData);
+    });
+    
+    // Titre
+    doc.fontSize(22).font('Helvetica-Bold').fillColor('#10b981')
+      .text('CURRICULUM VITAE', { align: 'center' });
+    
+    doc.moveDown();
+    doc.fontSize(14).font('Helvetica').fillColor('#333')
+      .text(`${finalData.nom} ${finalData.prenom}`, { align: 'center' });
+    
+    doc.moveDown(0.5);
+    doc.strokeColor('#10b981').lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
+    
+    // Contact
+    doc.moveDown();
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('CONTACT');
+    doc.fontSize(10).font('Helvetica').fillColor('#666');
+    doc.text(`Email : ${finalData.email}`, { indent: 10 });
+    doc.text(`Téléphone : ${finalData.telephone || 'Non renseigné'}`, { indent: 10 });
+    doc.text(`Adresse : ${finalData.adresse || 'Non renseignée'}`, { indent: 10 });
+    
+    // Formation
+    doc.moveDown();
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('FORMATION');
+    doc.fontSize(10).font('Helvetica').fillColor('#666');
+    doc.text(`Université : ${finalData.universite || 'Non renseignée'}`, { indent: 10 });
+    doc.text(`Filière : ${finalData.filiere || 'Non renseignée'}`, { indent: 10 });
+    doc.text(`Niveau : ${finalData.niveau || 'Non renseigné'}`, { indent: 10 });
+    
+    // Compétences
+    doc.moveDown();
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('COMPETENCES');
+    doc.fontSize(10).font('Helvetica').fillColor('#666');
+    if (finalData.competences && finalData.competences.length > 0) {
+      doc.text(finalData.competences.join('  |  '), { indent: 10 });
+    } else {
+      doc.text('Aucune compétence renseignée', { indent: 10 });
+    }
+    
+    // Expériences
+    if (finalData.experiences && finalData.experiences.length > 0) {
+      doc.addPage();
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('EXPERIENCES PROFESSIONNELLES');
+      doc.fontSize(10).font('Helvetica').fillColor('#666');
+      finalData.experiences.forEach(exp => {
+        doc.text(`• ${exp}`, { indent: 10 });
+        doc.moveDown(0.3);
+      });
+    }
+    
+    // Formations complémentaires
+    if (finalData.formations && finalData.formations.length > 0) {
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('FORMATIONS COMPLEMENTAIRES');
+      doc.fontSize(10).font('Helvetica').fillColor('#666');
+      finalData.formations.forEach(formation => {
+        doc.text(`• ${formation}`, { indent: 10 });
+        doc.moveDown(0.3);
+      });
+    }
+    
+    // Langues
+    if (finalData.langues && finalData.langues.length > 0) {
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('LANGUES');
+      doc.fontSize(10).font('Helvetica').fillColor('#666');
+      doc.text(finalData.langues.join('  |  '), { indent: 10 });
+    }
+    
+    // Centres d'intérêt
+    if (finalData.centresInteret && finalData.centresInteret.length > 0) {
+      doc.moveDown();
+      doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('CENTRES D\'INTERET');
+      doc.fontSize(10).font('Helvetica').fillColor('#666');
+      doc.text(finalData.centresInteret.join('  |  '), { indent: 10 });
+    }
+    
+    doc.end();
+    
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+// cvController.js
+const uploadStudentCV = async (req, res) => {
+  try {
+    console.log("📤 Upload CV - req.file:", req.file);
+    
+    if (!req.file) {
+      return res.status(400).json({ message: 'Aucun fichier uploadé' });
+    }
+    
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) {
+      return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+    }
+    
+    // Supprimer l'ancien CV s'il existe
+    if (student.cvPath) {
+      const fs = require('fs');
+      const path = require('path');
+      const oldPath = path.join(__dirname, '../uploads/cvs', student.cvPath);
+      if (fs.existsSync(oldPath)) {
+        fs.unlinkSync(oldPath);
+        console.log("🗑️ Ancien CV supprimé:", student.cvPath);
+      }
+    }
+    
+    // 🔥 Sauvegarde dans la base de données
+    await student.update({
+      cvPath: req.file.filename,
+      cvName: req.file.originalname
+    });
+    
+    // Vérifier que la mise à jour a fonctionné
+    const updatedStudent = await Student.findByPk(student.id);
+    console.log("✅ CV sauvegardé dans DB - cvPath:", updatedStudent.cvPath);
+    console.log("✅ CV sauvegardé dans DB - cvName:", updatedStudent.cvName);
+    
+    res.json({
+      success: true,
+      message: 'CV uploadé avec succès',
+      cvPath: req.file.filename,
+      cvName: req.file.originalname,
+      cvUrl: `/uploads/cvs/${req.file.filename}`
+    });
+  } catch (error) {
+    console.error("❌ Erreur uploadStudentCV:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+// @desc    Télécharger CV
+const downloadStudentCV = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student || !student.cvPath) {
+      return res.status(404).json({ message: 'Aucun CV trouvé' });
+    }
+    
+    const filePath = path.join(UPLOADS_DIR, student.cvPath);
+    
+    console.log("📄 Chemin du CV:", filePath);
+    console.log("📄 Fichier existe?", fs.existsSync(filePath));
+    
+    if (!fs.existsSync(filePath)) {
+      // Le fichier n'existe pas, nettoyer la base de données
+      await student.update({ cvPath: null, cvName: null });
+      return res.status(404).json({ 
+        message: 'Fichier CV introuvable sur le serveur. Veuillez le réuploader.'
+      });
+    }
+    
+    res.download(filePath, student.cvName || 'cv.pdf');
+  } catch (error) {
+    console.error('❌ Erreur téléchargement CV:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Supprimer CV
+const deleteStudentCV = async (req, res) => {
+  try {
+    const student = await Student.findOne({ where: { userId: req.user.id } });
+    if (!student) {
+      return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+    }
+    
+    if (student.cvPath) {
+      const filePath = path.join(UPLOADS_DIR, student.cvPath);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log("🗑️ CV supprimé:", filePath);
+      } else {
+        console.log(`⚠️ Fichier non trouvé: ${filePath}`);
+      }
+      await student.update({ cvPath: null, cvName: null });
+    }
+    
+    res.json({ success: true, message: 'CV supprimé avec succès' });
+  } catch (error) {
+    console.error('❌ Erreur suppression CV:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+module.exports = {
+  generateStudentCV,
+  uploadStudentCV,
+  deleteStudentCV,
+  downloadStudentCV
+};
