@@ -1,5 +1,8 @@
+// controllers/studentController.js
+
 const { Student, User, Favorite, Offer } = require('../models');
 const { Op } = require('sequelize');
+const { sequelize } = require('../config/db');  // ← AJOUTE CETTE LIGNE
 
 // @desc    Récupérer le profil étudiant
 // @route   GET /api/students/profile
@@ -41,8 +44,8 @@ const getStudentProfile = async (req, res) => {
         competences: student.competences,
         github: student.github,
         portfolio: student.portfolio,
-        cvPath: student.cvPath,     // ← Assure-toi que cette ligne existe
-        cvName: student.cvName,     // ← Assure-toi que cette ligne existe
+        cvPath: student.cvPath,
+        cvName: student.cvName,
         estPlace: student.estPlace,
         photoPath: student.photoPath,
         favorites: favoriteIds
@@ -160,11 +163,76 @@ const uploadStudentPhoto = async (req, res) => {
   }
 };
 
+const getStudentEvaluations = async (req, res) => {
+  try {
+    const student = await Student.findOne({ 
+      where: { userId: req.user.id },
+      attributes: ['id']
+    });
+    
+    if (!student) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Profil étudiant non trouvé' 
+      });
+    }
+    
+    const studentId = student.id;
+    console.log("📝 Récupération évaluations pour étudiant ID:", studentId);
+    
+    // Version avec jointure à Companies (avec guillemets)
+    const evaluations = await sequelize.query(
+      `SELECT 
+        e.id,
+        e.student_id,
+        e.application_id,
+        e.offre_titre,
+        e.entreprise_nom,
+        e.ponctualite,
+        e.qualite_travail,
+        e.autonomie,
+        e.esprit_equipe,
+        e.note,
+        e.commentaire,
+        e.progression,
+        e.date_evaluation,
+        e.company_id,
+        e.created_at,
+        c.nom as entreprise_nom_complete
+      FROM "evaluations" e
+      LEFT JOIN "Companies" c ON e.company_id = c.id
+      WHERE e.student_id = $1
+      ORDER BY e.date_evaluation DESC`,
+      {
+        bind: [studentId],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+    
+    console.log(`📊 ${evaluations.length} évaluations trouvées`);
+    
+    res.status(200).json({ 
+      success: true, 
+      evaluations: evaluations
+    });
+    
+  } catch (error) {
+    console.error("❌ Erreur getStudentEvaluations:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Erreur lors de la récupération des évaluations",
+      error: error.message 
+    });
+  }
+};
 
+// ============================================
+// EXPORTS
+// ============================================
 module.exports = {
   getStudentProfile,
   updateStudentProfile,
   updateSkills,
   uploadStudentPhoto,
-  
+  getStudentEvaluations  // ← Assure-toi que cette ligne existe
 };

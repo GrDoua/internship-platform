@@ -9,7 +9,7 @@ const {
   updateStudentProfile,
   updateSkills,
   uploadStudentPhoto,
-  
+  getStudentEvaluations 
 } = require('../controllers/studentController');
 const { 
   addFavorite, 
@@ -41,5 +41,6 @@ router.post('/generate-cv', protect, generateStudentCV);
 router.get('/favorites', protect, isStudent, getFavorites);
 router.post('/favorites/:offerId', protect, isStudent, addFavorite);
 router.delete('/favorites/:offerId', protect, isStudent, removeFavorite);
+router.get('/evaluations', protect, isStudent, getStudentEvaluations);
 
 module.exports = router;

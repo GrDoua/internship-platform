@@ -11,7 +11,7 @@ const {
   deleteMyApplication,
   getEvaluation,
 } = require('../controllers/applicationController');
-const{saveEvaluation}= require('../controllers/companyController');
+
 
 // Routes pour étudiant
 router.post('/', protect, isStudent, applyToOffer);                    
@@ -23,6 +23,6 @@ router.get('/:id/evaluation', protect, isStudent, getEvaluation);
 router.get('/company-applications', protect, isCompany, getCompanyApplications);
 router.put('/:id/status', protect, isCompany, updateApplicationStatus);
 router.delete('/:id', protect, isCompany, deleteApplication);
-router.post('/:id/evaluation', protect, isCompany, saveEvaluation);  // ← AJOUTER CETTE ROUTE
+// ← AJOUTER CETTE ROUTE
 
 module.exports = router;

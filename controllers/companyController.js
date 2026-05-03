@@ -1,5 +1,9 @@
 const { Company, User, Offer, Application, Student } = require('../models');
 const { Op } = require('sequelize');
+// controllers/companyController.js - TOUT EN HAUT
+const { sequelize } = require('../config/db');
+
+// Le reste de ton code...
  
 
 // ========== RÉCUPÉRER PROFIL ENTREPRISE ==========
@@ -580,96 +584,137 @@ const updateApplicationStatus = async (req, res) => {
   }
 };
 
-// ========== ENREGISTRER ÉVALUATION D'UN STAGIAIRE ==========
-// @desc    L'entreprise évalue un stagiaire
-// @route   POST /api/companies/evaluations/:applicationId
+// controllers/companyController.js
+
+// ============================================
+// AJOUTE CETTE FONCTION
+// ============================================
 const saveEvaluation = async (req, res) => {
+  // Éviter les réponses multiples
+  if (res.headersSent) return;
+  
   try {
     const { applicationId } = req.params;
     const { 
+      studentId, 
+      offreTitre, 
+      entrepriseNom, 
       ponctualite, 
       qualiteTravail, 
       autonomie, 
       espritEquipe, 
       note, 
       commentaire, 
-      progression 
+      progression, 
+      dateEvaluation 
     } = req.body;
-
-    console.log("📝 [ENTREPRISE] Sauvegarde évaluation - Application ID:", applicationId);
-    console.log("📝 Données reçues:", req.body);
-
-    // 1. Vérifier l'entreprise
-    const company = await Company.findOne({ where: { userId: req.user.id } });
-    if (!company) {
-      return res.status(404).json({ message: 'Entreprise non trouvée' });
-    }
-
-    // 2. Récupérer la candidature avec l'offre et l'étudiant
-    const application = await Application.findByPk(applicationId, {
-      include: [
-        { model: Offer },
-        { model: Student }
-      ]
-    });
-
-    if (!application) {
-      return res.status(404).json({ message: 'Candidature non trouvée' });
-    }
-
-    // 3. Vérifier que l'entreprise est propriétaire de l'offre
-    if (application.Offer.companyId !== company.id) {
-      return res.status(403).json({ message: 'Non autorisé - Cette candidature ne vous appartient pas' });
-    }
-
-    // 4. Vérifier que la candidature est acceptée
-    if (application.statut !== 'acceptee') {
+    
+    const companyId = req.user.id;
+    
+    console.log("📝 Sauvegarde évaluation:", { applicationId, studentId, offreTitre, companyId });
+    
+    // Validation des données
+    if (!applicationId || !studentId) {
       return res.status(400).json({ 
-        message: 'Seul un stagiaire accepté peut être évalué',
-        currentStatus: application.statut
+        success: false, 
+        message: "applicationId et studentId sont requis" 
       });
     }
-
-    // 5. Construire l'objet évaluation
-    const evaluation = {
-      ponctualite: ponctualite || 15,
-      qualiteTravail: qualiteTravail || 15,
-      autonomie: autonomie || 15,
-      espritEquipe: espritEquipe || 15,
-      note: note || 4,
-      commentaire: commentaire || '',
-      progression: progression || '',
-      dateEvaluation: new Date().toLocaleDateString('fr-FR'),
-      evaluateur: company.nom,
-      entrepriseId: company.id,
-      entrepriseNom: company.nom
-    };
-
-    console.log("📝 Évaluation à sauvegarder:", evaluation);
-
-    // 6. SAUVEGARDER DANS LA BASE DE DONNÉES
-    await application.update({ evaluation: evaluation });
-
-    console.log(`✅ Évaluation enregistrée avec succès pour l'étudiant: ${application.Student?.nom}`);
-
-    // 7. Retourner la réponse
-    res.status(200).json({
-      success: true,
-      message: 'Évaluation enregistrée avec succès',
-      evaluation: evaluation,
-      student: {
-        id: application.Student?.id,
-        nom: application.Student?.nom,
-        prenom: application.Student?.prenom,
-        email: application.Student?.email
+    
+    // Vérifier si l'évaluation existe déjà
+    const existingEval = await sequelize.query(
+      `SELECT id FROM evaluations WHERE application_id = $1`,
+      {
+        bind: [parseInt(applicationId)],
+        type: sequelize.QueryTypes.SELECT
       }
-    });
-
+    );
+    
+    if (existingEval && existingEval.length > 0) {
+      // Mettre à jour
+      await sequelize.query(
+        `UPDATE evaluations SET
+          ponctualite = $1,
+          qualite_travail = $2,
+          autonomie = $3,
+          esprit_equipe = $4,
+          note = $5,
+          commentaire = $6,
+          progression = $7,
+          date_evaluation = $8
+        WHERE application_id = $9`,
+        {
+          bind: [
+            parseInt(ponctualite) || 0,
+            parseInt(qualiteTravail) || 0,
+            parseInt(autonomie) || 0,
+            parseInt(espritEquipe) || 0,
+            parseInt(note) || 0,
+            commentaire || null,
+            progression || "moyenne",
+            dateEvaluation || new Date(),
+            parseInt(applicationId)
+          ]
+        }
+      );
+      
+      return res.status(200).json({ 
+        success: true, 
+        message: "Évaluation mise à jour avec succès" 
+      });
+    } else {
+      // Créer une nouvelle évaluation
+      await sequelize.query(
+        `INSERT INTO evaluations (
+          student_id, 
+          application_id, 
+          offre_titre, 
+          entreprise_nom,
+          ponctualite, 
+          qualite_travail, 
+          autonomie, 
+          esprit_equipe,
+          note, 
+          commentaire, 
+          progression, 
+          date_evaluation, 
+          company_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        {
+          bind: [
+            parseInt(studentId),
+            parseInt(applicationId),
+            offreTitre || "",
+            entrepriseNom || "",
+            parseInt(ponctualite) || 0,
+            parseInt(qualiteTravail) || 0,
+            parseInt(autonomie) || 0,
+            parseInt(espritEquipe) || 0,
+            parseInt(note) || 0,
+            commentaire || null,
+            progression || "moyenne",
+            dateEvaluation || new Date(),
+            parseInt(companyId)
+          ]
+        }
+      );
+      
+      return res.status(201).json({ 
+        success: true, 
+        message: "Évaluation enregistrée avec succès" 
+      });
+    }
+    
   } catch (error) {
     console.error("❌ Erreur saveEvaluation:", error);
-    res.status(500).json({ 
-      success: false,
-      message: error.message 
+    
+    // Éviter d'envoyer une réponse si déjà envoyée
+    if (res.headersSent) return;
+    
+    return res.status(500).json({ 
+      success: false, 
+      message: "Erreur lors de l'enregistrement de l'évaluation",
+      error: error.message 
     });
   }
 };
@@ -806,7 +851,7 @@ const getAdvancedStats = async (req, res) => {
   }
 };
 
-
+// N'OUBLIE PAS D'EXPORTER LA FONCTION À LA FIN DU FICHIER
 module.exports = {
   getCompanyProfile,
   updateCompanyProfile,
@@ -820,6 +865,7 @@ module.exports = {
   updateOfferStatus,
   getCompanyApplications,
   updateApplicationStatus,
-  saveEvaluation,
+  saveEvaluation,  // ← AJOUTE CETTE LIGNE
   getAdvancedStats
 };
+
