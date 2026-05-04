@@ -47,6 +47,11 @@ const Offer = sequelize.define('Offer', {
     type: DataTypes.DATE,
     allowNull: true
   },
+  estActive: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    field: 'estActive'  // ← Important : correspond au nom de colonne exact
+  },
   dateFin: {
     type: DataTypes.DATE,
     allowNull: true

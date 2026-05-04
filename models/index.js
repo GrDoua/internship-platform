@@ -49,6 +49,16 @@ Favorite.belongsTo(Student, { foreignKey: 'studentId' });
 Offer.hasMany(Favorite, { foreignKey: 'offerId' });
 Favorite.belongsTo(Offer, { foreignKey: 'offerId' });
 
+// Assure-toi d'avoir ces associations
+Student.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Student.hasMany(Application, { foreignKey: 'studentId', as: 'applications' });
+
+Offer.belongsTo(Company, { foreignKey: 'entrepriseId', as: 'company' });
+Offer.hasMany(Application, { foreignKey: 'offerId', as: 'applications' });
+
+Application.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
+Application.belongsTo(Offer, { foreignKey: 'offerId', as: 'offer' });
+
 // ========== EXPORT ==========
 module.exports = {
   User,

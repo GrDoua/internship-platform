@@ -52,6 +52,21 @@ const Application = sequelize.define('Application', {
    allowNull: true,
    defaultValue: null
 },
+conventionPath: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'conventionPath'
+  },
+  conventionName: {
+    type: DataTypes.STRING,
+    allowNull: true,
+    field: 'conventionName'
+  },
+  conventionUploadedAt: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'conventionUploadedAt'
+  },
   examineLe: {
     type: DataTypes.DATE,
     allowNull: true

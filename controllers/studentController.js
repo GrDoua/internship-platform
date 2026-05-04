@@ -1,6 +1,6 @@
 // controllers/studentController.js
 
-const { Student, User, Favorite, Offer } = require('../models');
+const { Student, User, Favorite, Offer,Application } = require('../models');
 const { Op } = require('sequelize');
 const { sequelize } = require('../config/db');  // ← AJOUTE CETTE LIGNE
 
@@ -225,7 +225,79 @@ const getStudentEvaluations = async (req, res) => {
     });
   }
 };
-
+// ========== TÉLÉCHARGER LA CONVENTION ==========
+// ========== TÉLÉCHARGER LA CONVENTION ==========
+const downloadConvention = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    const userId = req.user.id;
+    
+    console.log("📥 Téléchargement convention - Application ID:", applicationId);
+    console.log("👤 User ID:", userId);
+    
+    // Récupérer l'étudiant à partir de l'utilisateur
+    const student = await Student.findOne({ where: { userId: userId } });
+    
+    if (!student) {
+      console.log("❌ Étudiant non trouvé pour userId:", userId);
+      return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+    }
+    
+    console.log("✅ Étudiant trouvé - ID:", student.id);
+    
+    // Vérifier que la candidature appartient à l'étudiant
+    const application = await Application.findOne({
+      where: { 
+        id: applicationId,
+        studentId: student.id
+      }
+    });
+    
+    console.log("🔍 Recherche candidature avec studentId:", student.id, "et applicationId:", applicationId);
+    console.log("📊 Résultat:", application);
+    
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée pour cet étudiant' });
+    }
+    
+    if (!application.conventionPath) {
+      return res.status(404).json({ message: 'Aucune convention disponible pour cette candidature' });
+    }
+    
+    // Chemin du fichier
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Chercher le fichier dans différents dossiers
+    const possiblePaths = [
+      path.join(__dirname, '../uploads/conventions', application.conventionPath),
+      path.join(__dirname, '../uploads/cvs', application.conventionPath),
+      path.join(__dirname, '../uploads', application.conventionPath)
+    ];
+    
+    let filePath = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        filePath = p;
+        console.log("✅ Fichier trouvé:", p);
+        break;
+      }
+    }
+    
+    if (!filePath) {
+      console.log("❌ Fichier non trouvé dans:", possiblePaths);
+      return res.status(404).json({ message: 'Fichier convention introuvable sur le serveur' });
+    }
+    
+    // Envoyer le fichier
+    const fileName = application.conventionName || `convention_${applicationId}.pdf`;
+    res.download(filePath, fileName);
+    
+  } catch (error) {
+    console.error("❌ Erreur downloadConvention:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 // ============================================
 // EXPORTS
 // ============================================
@@ -234,5 +306,6 @@ module.exports = {
   updateStudentProfile,
   updateSkills,
   uploadStudentPhoto,
+  downloadConvention,
   getStudentEvaluations  // ← Assure-toi que cette ligne existe
 };

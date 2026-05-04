@@ -9,7 +9,8 @@ const {
   updateStudentProfile,
   updateSkills,
   uploadStudentPhoto,
-  getStudentEvaluations 
+  getStudentEvaluations ,
+  downloadConvention
 } = require('../controllers/studentController');
 const { 
   addFavorite, 
@@ -42,5 +43,8 @@ router.get('/favorites', protect, isStudent, getFavorites);
 router.post('/favorites/:offerId', protect, isStudent, addFavorite);
 router.delete('/favorites/:offerId', protect, isStudent, removeFavorite);
 router.get('/evaluations', protect, isStudent, getStudentEvaluations);
+
+// Ajoute cette route
+router.get('/applications/:applicationId/convention', protect, isStudent, downloadConvention);
 
 module.exports = router;

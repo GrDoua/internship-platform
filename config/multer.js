@@ -14,25 +14,30 @@ const ensureDirectoryExists = (dir) => {
 const uploadsDir = path.join(__dirname, '../uploads');
 const cvsDir = path.join(__dirname, '../uploads/cvs');
 const logosDir = path.join(__dirname, '../uploads/companyLogos');
-const studentPhotosDir = path.join(__dirname, '../uploads/student-photos'); // ⭐ AJOUTE CETTE LIGNE
+const studentPhotosDir = path.join(__dirname, '../uploads/student-photos');
+const adminPhotosDir = path.join(__dirname, '../uploads/admin-photos');
 
 ensureDirectoryExists(uploadsDir);
 ensureDirectoryExists(cvsDir);
 ensureDirectoryExists(logosDir);
-ensureDirectoryExists(studentPhotosDir);  // ⭐ AJOUTE CETTE LIGNE
+ensureDirectoryExists(studentPhotosDir);
+ensureDirectoryExists(adminPhotosDir);
 
 // ========== 2. CONFIGURATION STOCKAGE ==========
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // ⭐ AJOUTE LE CAS POUR 'photo'
     if (file.fieldname === 'photo') {
-      cb(null, studentPhotosDir);
+      if (req.user && req.user.role === 'admin') {
+        cb(null, adminPhotosDir);
+      } else {
+        cb(null, studentPhotosDir);
+      }
     } else if (file.fieldname === 'cv' || file.fieldname === 'cVFile') {
-     cb(null, cvsDir);
+      cb(null, cvsDir);
     } else if (file.fieldname === 'logo' || file.fieldname === 'companyLogo') {
       cb(null, logosDir);
     } else {
-       cb(null, uploadsDir);
+      cb(null, uploadsDir);
     }
   },
   
@@ -50,16 +55,15 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const allowedTypes = {
     cv: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    photo: ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp'],  // ⭐ AJOUTE CETTE LIGNE
+    photo: ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp'],
     logo: ['image/jpeg', 'image/png', 'image/jpg', 'image/gif', 'image/webp'],
     default: ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg']
   };
   
-  // ⭐ AJOUTE LE CAS POUR 'photo'
   let allowedMimeTypes = allowedTypes.default;
   if (file.fieldname === 'cv') {
     allowedMimeTypes = allowedTypes.cv;
-  } else if (file.fieldname === 'photo') {  // ⭐ AJOUTE CETTE CONDITION
+  } else if (file.fieldname === 'photo') {
     allowedMimeTypes = allowedTypes.photo;
   } else if (file.fieldname === 'logo') {
     allowedMimeTypes = allowedTypes.logo;
@@ -93,7 +97,27 @@ const uploadCVAndLogo = upload.fields([
 ]);
 const uploadConventionPDF = upload.single('convention');
 
-// ========== 6. FONCTIONS UTILITAIRES ==========
+// ========== 6. GESTION DES ERREURS ==========
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    switch (err.code) {
+      case 'LIMIT_FILE_SIZE':
+        return res.status(400).json({ message: 'Fichier trop grand. Maximum 5MB.' });
+      case 'LIMIT_FILE_COUNT':
+        return res.status(400).json({ message: 'Trop de fichiers. Maximum 5.' });
+      case 'LIMIT_UNEXPECTED_FILE':
+        return res.status(400).json({ message: `Champ '${err.field}' non attendu.` });
+      default:
+        return res.status(400).json({ message: err.message });
+    }
+  }
+  if (err) {
+    return res.status(400).json({ message: err.message });
+  }
+  next();
+};
+
+// ========== 7. FONCTIONS UTILITAIRES ==========
 const deleteFile = (filePath) => {
   if (filePath && fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -109,23 +133,6 @@ const getFileUrl = (req, filename, subfolder = '') => {
   return `${baseUrl}/uploads/${folder}${filename}`;
 };
 
-// ========== 7. GESTION DES ERREURS ==========
-const handleMulterError = (err, req, res, next) => {
-  if (err instanceof multer.MulterError) {
-    switch (err.code) {
-      case 'LIMIT_FILE_SIZE':
-        return res.status(400).json({ message: 'Fichier trop grand. Maximum 5MB.' });
-      case 'LIMIT_FILE_COUNT':
-        return res.status(400).json({ message: 'Trop de fichiers. Maximum 5.' });
-      case 'LIMIT_UNEXPECTED_FILE':
-        return res.status(400).json({ message: `Champ '${err.field}' non attendu.` });
-      default:
-        return res.status(400).json({ message: err.message });
-    }
-  }
-  next(err);
-};
-
 // ========== 8. EXPORTATION ==========
 module.exports = {
   upload,
@@ -137,5 +144,5 @@ module.exports = {
   uploadCVAndLogo,
   deleteFile,
   getFileUrl,
-  handleMulterError
+  handleMulterError  // ← UNE SEULE FOIS !!
 };
