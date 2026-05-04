@@ -2,6 +2,7 @@ const { Company, User, Offer, Application, Student } = require('../models');
 const { Op } = require('sequelize');
 // controllers/companyController.js - TOUT EN HAUT
 const { sequelize } = require('../config/db');
+const path = require('path');
 
 // Le reste de ton code...
  
@@ -850,6 +851,78 @@ const getAdvancedStats = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+// ========== TÉLÉCHARGER LE CV D'UN CANDIDAT ==========
+const getStudentCV = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    
+    console.log("📥 Téléchargement CV - Application ID:", applicationId);
+    
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    }
+    
+    // 1. Vérifier que l'entreprise existe
+    const company = await Company.findOne({ where: { userId: req.user.id } });
+    if (!company) {
+      return res.status(404).json({ message: 'Profil entreprise non trouvé' });
+    }
+    
+    // 2. Récupérer la candidature
+    const application = await Application.findByPk(applicationId);
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    
+    // 3. Vérifier que cette candidature appartient bien à une offre de l'entreprise
+    const offer = await Offer.findByPk(application.offerId);
+    if (!offer || offer.entrepriseId !== company.id) {
+      return res.status(403).json({ message: 'Accès non autorisé à ce CV' });
+    }
+    
+    // 4. Récupérer l'étudiant et son CV
+    const student = await Student.findByPk(application.studentId);
+    if (!student || !student.cvPath) {
+      return res.status(404).json({ message: 'CV non trouvé' });
+    }
+    
+    console.log("📁 cvPath stocké dans Student:", student.cvPath);
+    
+    // 5. Construire le chemin complet du fichier en utilisant le même dossier que cvController
+    const fs = require('fs');
+    
+    // Utiliser le même chemin que dans cvController
+    const UPLOADS_DIR = path.join(__dirname, '../uploads/cvs');
+    const cvFullPath = path.join(UPLOADS_DIR, student.cvPath);
+    
+    console.log("📁 Chemin complet du CV:", cvFullPath);
+    console.log("📁 Le fichier existe?", fs.existsSync(cvFullPath));
+    
+    // 6. Vérifier si le fichier existe
+    if (!fs.existsSync(cvFullPath)) {
+      console.log("❌ Fichier introuvable au chemin:", cvFullPath);
+      return res.status(404).json({ message: 'Fichier CV introuvable sur le serveur' });
+    }
+    
+    // 7. Envoyer le fichier pour téléchargement
+    const fileName = student.cvName || `CV_${student.prenom || 'Candidat'}_${student.nom || 'Inconnu'}.pdf`;
+    
+    res.download(cvFullPath, fileName, (err) => {
+      if (err) {
+        console.error("❌ Erreur lors du téléchargement:", err);
+        if (!res.headersSent) {
+          res.status(500).json({ message: 'Erreur lors du téléchargement du CV' });
+        }
+      } else {
+        console.log("✅ CV téléchargé avec succès:", fileName);
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Erreur getStudentCV:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 
 // N'OUBLIE PAS D'EXPORTER LA FONCTION À LA FIN DU FICHIER
 module.exports = {
@@ -866,6 +939,7 @@ module.exports = {
   getCompanyApplications,
   updateApplicationStatus,
   saveEvaluation,  // ← AJOUTE CETTE LIGNE
-  getAdvancedStats
+  getAdvancedStats,
+  getStudentCV
 };
 

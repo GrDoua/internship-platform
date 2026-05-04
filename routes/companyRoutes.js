@@ -18,7 +18,8 @@ const {
   getCompanyApplications,
   updateApplicationStatus,
   saveEvaluation,
-  getAdvancedStats
+  getAdvancedStats,
+  getStudentCV
 } = require('../controllers/companyController');
 
 // ========== PROFIL ==========
@@ -49,5 +50,7 @@ router.put('/applications/:id/status', protect, isCompany, updateApplicationStat
 // ========== ÉVALUATIONS ==========
 // ✅ Correction : utiliser 'applicationId' comme nom de paramètre
  router.post('/evaluations/:applicationId', protect, isCompany, saveEvaluation);
+
+ router.get('/applications/:applicationId/cv', protect, isCompany, getStudentCV);
 
 module.exports = router;
