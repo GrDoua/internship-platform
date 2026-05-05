@@ -35,6 +35,10 @@ const Admin = sequelize.define('Admin', {
   photoPath: {                                // ← AJOUTÉ (photo de profil)
     type: DataTypes.STRING,
     allowNull: true
+  },
+  universite: {  // ← AJOUTE CETTE LIGNE
+    type: DataTypes.STRING,
+    allowNull: true  // Si null, l'admin voit tous les étudiants
   }
 }, {
    tableName: 'Admins',

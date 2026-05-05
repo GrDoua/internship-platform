@@ -3,6 +3,7 @@ const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 
 // ========== 1. RÉCUPÉRER PROFIL ADMIN ==========
+// adminController.js - getAdminProfile
 const getAdminProfile = async (req, res) => {
   try {
     const admin = await Admin.findOne({
@@ -23,7 +24,8 @@ const getAdminProfile = async (req, res) => {
         telephone: admin.telephone,
         bureau: admin.bureau,
         bio: admin.bio,
-        photoPath: admin.photoPath  // ← AJOUTE CETTE LIGNE
+        photoPath: admin.photoPath,
+        universite: admin.universite  // ← AJOUTE CETTE LIGNE
       }
     });
   } catch (error) {
@@ -32,17 +34,17 @@ const getAdminProfile = async (req, res) => {
   }
 };
 
-// ========== 2. METTRE À JOUR PROFIL ADMIN ==========
+// adminController.js - updateAdminProfile
 const updateAdminProfile = async (req, res) => {
   try {
-    const { fullName, titre, email, telephone, bureau, bio } = req.body;
-    const admin = await Admin.findOne({ where: { userId: req.user.id } });  // ✅ req.user.id (u صغيرة)
+    const { fullName, titre, email, telephone, bureau, bio, universite } = req.body;  // ← ajout universite
+    const admin = await Admin.findOne({ where: { userId: req.user.id } });
     if (!admin) {
       return res.status(404).json({ message: 'Profil admin non trouvé' });
     }
     
     // Mettre à jour l'email dans User si changé
-    if (email && email !== req.user.email) {  // ✅ && (pas &)
+    if (email && email !== req.user.email) {
       await User.update({ email }, { where: { id: req.user.id } });
     }
 
@@ -51,7 +53,8 @@ const updateAdminProfile = async (req, res) => {
       titre: titre || admin.titre,
       telephone: telephone || admin.telephone,
       bureau: bureau || admin.bureau,
-      bio: bio || admin.bio
+      bio: bio || admin.bio,
+      universite: universite || admin.universite  // ← AJOUTE CETTE LIGNE
     });
 
     const updatedUser = await User.findByPk(req.user.id);
@@ -65,12 +68,13 @@ const updateAdminProfile = async (req, res) => {
         email: updatedUser.email,
         telephone: admin.telephone,
         bureau: admin.bureau,
-        bio: admin.bio
+        bio: admin.bio,
+        universite: admin.universite  // ← AJOUTE CETTE LIGNE
       }
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: error.message });  // ✅ error.message
+    res.status(500).json({ message: error.message });
   }
 };
 
@@ -140,20 +144,64 @@ const changeAdminPassword = async (req, res) => {
 // ========== 5. STATISTIQUES GLOBALES ==========
 const getStatistics = async (req, res) => {
   try {
-    const totalStudents = await Student.count();
-    const totalCompanies = await Company.count();
-    const totalOffers = await Offer.count();
-    const totalApplications = await Application.count();
+    // Récupérer l'admin connecté pour connaître son université
+    const admin = await Admin.findOne({ where: { userId: req.user.id } });
+    const adminUniversite = admin?.universite;
     
-    const placedStudents = await Student.count({ where: { estPlace: true } });
-    const unplacedStudents = totalStudents - placedStudents;
+    let totalStudents, totalCompanies, totalOffers, totalApplications;
+    let placedStudents, unplacedStudents;
+    let pendingApplications, acceptedApplications, refusedApplications;
+    let activeOffers, inactiveOffers;
     
-    const pendingApplications = await Application.count({ where: { statut: 'en_attente' } });
-    const acceptedApplications = await Application.count({ where: { statut: 'acceptee' } });
-    const refusedApplications = await Application.count({ where: { statut: 'refusee' } });
-
-    const activeOffers = await Offer.count({ where: { estActive: true } });  // ← Utilise estActive
-    const inactiveOffers = totalOffers - activeOffers;
+    if (adminUniversite) {
+      // Admin d'université : comptage filtré
+      console.log(`📚 Statistiques filtrées pour: ${adminUniversite}`);
+      
+      // Étudiants de l'université
+      totalStudents = await Student.count({ where: { universite: adminUniversite } });
+      placedStudents = await Student.count({ where: { universite: adminUniversite, estPlace: true } });
+      unplacedStudents = totalStudents - placedStudents;
+      
+      // Récupérer les IDs des étudiants de l'université
+      const students = await Student.findAll({ 
+        where: { universite: adminUniversite },
+        attributes: ['id'] 
+      });
+      const studentIds = students.map(s => s.id);
+      
+      // Candidatures des étudiants de l'université
+      totalApplications = await Application.count({ where: { studentId: studentIds } });
+      pendingApplications = await Application.count({ where: { studentId: studentIds, statut: 'en_attente' } });
+      acceptedApplications = await Application.count({ where: { studentId: studentIds, statut: 'acceptee' } });
+      refusedApplications = await Application.count({ where: { studentId: studentIds, statut: 'refusee' } });
+      
+      // Toutes les offres (pas de filtre université car les offres sont des entreprises)
+      totalOffers = await Offer.count();
+      activeOffers = await Offer.count({ where: { statut: 'active' } });
+      inactiveOffers = totalOffers - activeOffers;
+      
+      // Toutes les entreprises
+      totalCompanies = await Company.count();
+      
+    } else {
+      // Admin super : statistiques globales
+      console.log(`🌍 Statistiques globales pour super admin`);
+      
+      totalStudents = await Student.count();
+      totalCompanies = await Company.count();
+      totalOffers = await Offer.count();
+      totalApplications = await Application.count();
+      
+      placedStudents = await Student.count({ where: { estPlace: true } });
+      unplacedStudents = totalStudents - placedStudents;
+      
+      pendingApplications = await Application.count({ where: { statut: 'en_attente' } });
+      acceptedApplications = await Application.count({ where: { statut: 'acceptee' } });
+      refusedApplications = await Application.count({ where: { statut: 'refusee' } });
+      
+      activeOffers = await Offer.count({ where: { statut: 'active' } });
+      inactiveOffers = totalOffers - activeOffers;
+    }
     
     res.json({
       success: true,
@@ -161,7 +209,8 @@ const getStatistics = async (req, res) => {
         students: { total: totalStudents, placed: placedStudents, unplaced: unplacedStudents },
         companies: totalCompanies,
         offers: { total: totalOffers, active: activeOffers, inactive: inactiveOffers },
-        applications: { total: totalApplications, pending: pendingApplications, accepted: acceptedApplications, refused: refusedApplications }
+        applications: { total: totalApplications, pending: pendingApplications, accepted: acceptedApplications, refused: refusedApplications },
+        adminUniversite: adminUniversite // Optionnel : pour info
       }
     });
   } catch (error) {
@@ -171,15 +220,32 @@ const getStatistics = async (req, res) => {
 };
 
 // ========== 6. RÉCUPÉRER TOUS LES ÉTUDIANTS ==========
+// adminController.js - getAllStudents (version filtrée)
 const getAllStudents = async (req, res) => {
   try {
+    // Récupérer l'admin connecté pour connaître son université
+    const admin = await Admin.findOne({ where: { userId: req.user.id } });
+    const adminUniversite = admin?.universite;
+    
+    let whereCondition = {};
+    
+    // Si l'admin a une université assignée, filtrer les étudiants
+    if (adminUniversite) {
+      whereCondition = { universite: adminUniversite };
+      console.log(`📚 Admin de l'université: ${adminUniversite} - Filtrage des étudiants`);
+    } else {
+      console.log(`🌍 Admin super - Voit tous les étudiants`);
+    }
+    
     const students = await Student.findAll({
+      where: whereCondition,
       include: [{ 
         model: User, 
-        as: 'user',  // ← Utilise l'alias 'user' au lieu de 'User'
+        as: 'user',
         attributes: ['id', 'email', 'role', 'isActive']
       }]
     });
+    
     res.json({ success: true, count: students.length, students });
   } catch (error) {
     console.error(error);
@@ -192,7 +258,6 @@ const getAllCompanies = async (req, res) => {
     const companies = await Company.findAll({
       include: [{ 
         model: User, 
-        as: 'user',  // ← Utilise l'alias 'user'
         attributes: ['id', 'email', 'role', 'isActive']
       }]
     });
@@ -217,99 +282,166 @@ const deleteOfferByAdmin = async (req, res) => {
   }
 };
 
-// ========== 10. RÉCUPÉRER TOUTES LES CANDIDATURES ==========
-// ========== 10. RÉCUPÉRER TOUTES LES CANDIDATURES ==========
+// adminController.js - getAllApplications (version complète corrigée)
 const getAllApplications = async (req, res) => {
   try {
-    const applications = await Application.findAll({
-      include: [
-        { 
-          model: Student, 
-          as: 'student',
-          include: [{ 
-            model: User, 
-            as: 'user',
-            attributes: ['id', 'email']
-          }]
-        },
-        { 
-          model: Offer, 
-          as: 'offer',
-          include: [{ 
-            model: Company, 
-            as: 'company',
-            attributes: ['id', 'nom']
-          }]
-        }
-      ],
-      order: [['createdAt', 'DESC']]
+    console.log("========== getAllApplications ==========");
+    console.log("req.user.id:", req.user.id);
+    
+    // 1. Récupérer l'admin avec son université
+    const admin = await Admin.findOne({ 
+      where: { userId: req.user.id }
     });
     
-    // Transformer les données pour le frontend avec les bons noms de champs
+    if (!admin) {
+      console.error("❌ Admin non trouvé pour userId:", req.user.id);
+      return res.status(404).json({ message: 'Admin non trouvé' });
+    }
+    
+    const adminUniversite = admin.universite;
+    console.log("🏫 Admin université:", adminUniversite);
+    
+    let applications;
+    
+    // 2. Si l'admin a une université, filtrer
+    if (adminUniversite && adminUniversite.trim() !== '') {
+      console.log(`📚 Filtrage pour: ${adminUniversite}`);
+      
+      // Récupérer les IDs des étudiants de cette université
+      const students = await Student.findAll({ 
+        where: { universite: adminUniversite },
+        attributes: ['id']
+      });
+      
+      const studentIds = students.map(s => s.id);
+      console.log(`👨‍🎓 Étudiants trouvés (${studentIds.length}):`, studentIds);
+      
+      if (studentIds.length === 0) {
+        console.log("⚠️ Aucun étudiant trouvé");
+        return res.json({ success: true, count: 0, applications: [] });
+      }
+      
+      // Récupérer les candidatures de ces étudiants
+      applications = await Application.findAll({
+        where: { studentId: studentIds },
+        include: [
+          { 
+            model: Student, 
+            as: 'student',
+            include: [{ 
+              model: User, 
+              as: 'user',
+              attributes: ['id', 'email']
+            }]
+          },
+          { 
+            model: Offer, 
+            as: 'offer',
+            include: [{ 
+              model: Company, 
+              as: 'company',
+              attributes: ['id', 'nom']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+      
+    } else {
+      // Admin super - voit tout
+      console.log("🌍 Admin super - pas de filtre");
+      applications = await Application.findAll({
+        include: [
+          { 
+            model: Student, 
+            as: 'student',
+            include: [{ 
+              model: User, 
+              as: 'user',
+              attributes: ['id', 'email']
+            }]
+          },
+          { 
+            model: Offer, 
+            as: 'offer',
+            include: [{ 
+              model: Company, 
+              as: 'company',
+              attributes: ['id', 'nom']
+            }]
+          }
+        ],
+        order: [['createdAt', 'DESC']]
+      });
+    }
+    
+    console.log(`📊 Candidatures trouvées: ${applications.length}`);
+    
+    // 3. Formater les données
     const formattedApplications = applications.map(app => ({
       id: app.id,
       studentId: app.studentId,
       offerId: app.offerId,
-      // Nom de l'étudiant
       etudiantNom: app.student ? `${app.student.prenom || ''} ${app.student.nom || ''}`.trim() : 'Étudiant inconnu',
-      // Email
+      universite: app.student?.universite || 'Non renseignée',
       email: app.student?.user?.email || 'Email non renseigné',
-      // Téléphone
       telephone: app.student?.telephone || 'Non renseigné',
-      // Titre de l'offre
       offreTitre: app.offer?.titre || 'Offre inconnue',
-      // Nom de l'entreprise
       entrepriseNom: app.offer?.company?.nom || 'Entreprise inconnue',
-      // Statut
       statut: app.statut,
-      // Date
       date: app.createdAt,
-      // Message
       message: app.message || '',
-      // CV
       cvPath: app.cvPath,
-      // Convention
       conventionPath: app.conventionPath,
       conventionName: app.conventionName
     }));
     
-    console.log(`📊 ${formattedApplications.length} candidatures formatées`);
-    console.log("📋 Première candidature:", formattedApplications[0]);
+    console.log(`✅ ${formattedApplications.length} candidatures formatées`);
     
     res.json({ 
       success: true, 
       count: formattedApplications.length, 
       applications: formattedApplications 
     });
+    
   } catch (error) {
     console.error("❌ Erreur getAllApplications:", error);
     res.status(500).json({ message: error.message });
   }
 };
-// ========== 11. VALIDER UN STAGE ==========
-const validateInternship = async (req, res) => {  // ✅ validateInternship (s dans internship)
+// adminController.js - validateInternship (admin valide avec convention)
+const validateInternship = async (req, res) => {
   try {
-    const application = await Application.findByPk(req.params.applicationId, {
-      include: [
-        { model: Student },
-        { model: Offer, include: [{ model: Company }] }
-      ]
-    });
+    const { applicationId } = req.params;
+    
+    const application = await Application.findByPk(applicationId);
     if (!application) {
       return res.status(404).json({ message: 'Candidature non trouvée' });
     }
-    if (application.statut !== 'acceptee') {  // ✅ statut (pas status) و acceptee
-      return res.status(400).json({ message: 'La candidature doit être acceptée d\'abord par l\'entreprise' });
+    
+    // ✅ Vérifier que l'entreprise a déjà accepté
+    if (application.statut !== 'accepte_entreprise') {
+      return res.status(400).json({ 
+        message: 'L\'entreprise doit d\'abord accepter la candidature' 
+      });
     }
-    if (application.valideParAdmin) {
-      return res.status(400).json({ message: 'Déjà validée par l\'administration' });
-    }
-    await application.update({ valideParAdmin: true });
-    await application.Student.update({ estPlace: true });
+    
+    // ✅ Passer à 'accepte_universite' (validation finale)
+    await application.update({ 
+      statut: 'accepte_universite',
+      valideParAdmin: true,
+      examineLe: new Date()
+    });
+    
+    // Mettre à jour l'étudiant comme placé
+    await Student.update(
+      { estPlace: true },
+      { where: { id: application.studentId } }
+    );
+    
     res.json({
       success: true,
-      message: 'Stage validé par l\'administration',
-      application
+      message: 'Stage validé par l\'université, convention acceptée'
     });
   } catch (error) {
     console.error(error);
@@ -426,6 +558,10 @@ const generateConvention = async (req, res) => {
       return res.status(400).json({ message: 'Informations manquantes pour générer la convention' });
     }
     
+    // ✅ AJOUTE CETTE LIGNE - Changer le statut avant de générer le PDF
+    await application.update({ statut: 'accepte_universite' });
+    console.log(`✅ Statut de la candidature ${applicationId} mis à jour vers accepte_universite`);
+    
     // Créer le dossier conventions s'il n'existe pas
     const conventionsDir = path.join(__dirname, '../uploads/conventions');
     if (!fs.existsSync(conventionsDir)) {
@@ -441,93 +577,7 @@ const generateConvention = async (req, res) => {
     const writeStream = fs.createWriteStream(filePath);
     doc.pipe(writeStream);
     
-    // En-tête
-    doc.fontSize(20).font('Helvetica-Bold').fillColor('#1a5f7a')
-      .text('CONVENTION DE STAGE', { align: 'center' });
-    
-    doc.moveDown();
-    doc.fontSize(12).font('Helvetica')
-      .text('Entre les soussignés :', { align: 'left' });
-    
-    doc.moveDown();
-    
-    // Partie Entreprise
-    doc.fontSize(11).font('Helvetica-Bold').fillColor('#333')
-      .text('L\'entreprise :', { underline: true });
-    doc.fontSize(10).font('Helvetica')
-      .text(`${company.nom || '_________________________'}`, { indent: 20 })
-      .text(`Secteur d'activité : ${company.secteur || '_________________________'}`, { indent: 20 })
-      .text(`Adresse : ${company.localisation || '_________________________'}`, { indent: 20 })
-      .text(`Téléphone : ${company.telephone || '_________________________'}`, { indent: 20 })
-      .text(`Email : ${company.user?.email || '_________________________'}`, { indent: 20 });
-    
-    doc.moveDown();
-    
-    // Partie Étudiant
-    doc.fontSize(11).font('Helvetica-Bold')
-      .text('L\'étudiant :', { underline: true });
-    doc.fontSize(10).font('Helvetica')
-      .text(`Nom et prénom : ${student.nom || ''} ${student.prenom || ''}`, { indent: 20 })
-      .text(`Filière : ${student.filiere || '_________________________'}`, { indent: 20 })
-      .text(`Niveau : ${student.niveau || '_________________________'}`, { indent: 20 })
-      .text(`Université : ${student.universite || '_________________________'}`, { indent: 20 })
-      .text(`Email : ${student.user?.email || '_________________________'}`, { indent: 20 })
-      .text(`Téléphone : ${student.telephone || '_________________________'}`, { indent: 20 });
-    
-    doc.moveDown();
-    
-    // Détails du stage
-    doc.fontSize(11).font('Helvetica-Bold')
-      .text('Objet du stage :', { underline: true });
-    doc.fontSize(10).font('Helvetica')
-      .text(`Intitulé du poste : ${offer.titre || '_________________________'}`, { indent: 20 })
-      .text(`Description : ${offer.description || '_________________________'}`, { indent: 20 })
-      .text(`Durée : ${offer.duree || '_________________________'}`, { indent: 20 })
-      .text(`Date de début : ${offer.dateDebut ? new Date(offer.dateDebut).toLocaleDateString('fr-FR') : '_________________________'}`, { indent: 20 })
-      .text(`Date de fin : ${offer.dateFin ? new Date(offer.dateFin).toLocaleDateString('fr-FR') : '_________________________'}`, { indent: 20 })
-      .text(`Salaire : ${offer.salaire || 'Non spécifié'}`, { indent: 20 });
-    
-    doc.moveDown();
-    
-    // Compétences
-    if (offer.competences && offer.competences.length > 0) {
-      doc.fontSize(11).font('Helvetica-Bold')
-        .text('Compétences requises :', { underline: true });
-      doc.fontSize(10).font('Helvetica');
-      offer.competences.forEach(comp => {
-        doc.text(`• ${comp}`, { indent: 20 });
-      });
-      doc.moveDown();
-    }
-    
-    // Avantages
-    if (offer.avantages && offer.avantages.length > 0) {
-      doc.fontSize(11).font('Helvetica-Bold')
-        .text('Avantages :', { underline: true });
-      doc.fontSize(10).font('Helvetica');
-      offer.avantages.forEach(avantage => {
-        doc.text(`• ${avantage}`, { indent: 20 });
-      });
-      doc.moveDown();
-    }
-    
-    // Signatures
-    doc.moveDown(2);
-    doc.fontSize(10).font('Helvetica');
-    
-    // Ligne de signature
-    const pageWidth = doc.page.width - 100;
-    const signatureY = doc.y;
-    
-    doc.text('Fait à _________________, le ' + new Date().toLocaleDateString('fr-FR'), { align: 'center' });
-    doc.moveDown();
-    
-    doc.text('Signature de l\'entreprise', 50, signatureY + 40);
-    doc.text('Signature de l\'étudiant', pageWidth - 150, signatureY + 40);
-    
-    doc.moveDown(5);
-    doc.text('Cachet de l\'entreprise', 50, doc.y);
-    doc.text('Signature de l\'administration', pageWidth - 150, doc.y);
+    // ... le reste de ton code de génération PDF (en-tête, contenu, signatures) ...
     
     // Finaliser le PDF
     doc.end();
@@ -558,12 +608,86 @@ const generateConvention = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+// adminController.js
+// adminController.js - updateApplicationStatus (amélioré)
+const updateApplicationStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const { id } = req.params;
+    
+    console.log(`🔄 Mise à jour candidature ${id} vers ${status}`);
+    
+    // Vérifier que le statut est valide
+    const validStatus = ['en_attente', 'accepte_entreprise', 'accepte_universite', 'refusee'];
+    if (!validStatus.includes(status)) {
+      return res.status(400).json({ message: 'Statut invalide' });
+    }
+    
+    const application = await Application.findByPk(id);
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    
+    // ✅ Ajoute la date d'examen
+    await application.update({ 
+      statut: status,
+      examineLe: new Date()
+    });
+    
+    console.log(`✅ Candidature ${id} mise à jour: ${status}`);
+    
+    // ✅ Message personnalisé selon le statut
+    let message = 'Statut mis à jour';
+    if (status === 'refusee') message = 'Candidature refusée avec succès';
+    if (status === 'accepte_universite') message = 'Stage validé par l\'université';
+    if (status === 'accepte_entreprise') message = 'Candidature acceptée par l\'entreprise';
+    
+    res.json({ success: true, message, application });
+  } catch (error) {
+    console.error('Erreur updateApplicationStatus:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+// adminController.js - Ajoute cette fonction
+const refuseApplication = async (req, res) => {
+  try {
+    console.log("🚀 Refus de candidature par admin...");
+    console.log("Application ID:", req.params.id);
+    
+    const applicationId = req.params.id;
+    
+    // Récupérer la candidature
+    const application = await Application.findByPk(applicationId);
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    
+    // Mettre à jour le statut à 'refusee'
+    await application.update({ 
+      statut: 'refusee',
+      examineLe: new Date()
+    });
+    
+    console.log(`✅ Candidature ${applicationId} refusée par l'admin`);
+    
+    res.json({
+      success: true,
+      message: 'Candidature refusée avec succès',
+      application
+    });
+  } catch (error) {
+    console.error("❌ Erreur refuseApplication:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
 // ========== EXPORT ==========
 module.exports = {
   getAdminProfile,
   generateConvention,
   updateAdminProfile,
   uploadAdminPhoto,
+  refuseApplication,
   changeAdminPassword,
   getStatistics,
   getAllStudents,
@@ -572,5 +696,6 @@ toggleUserStatus,
   deleteOfferByAdmin,
   uploadConvention,
   getAllApplications,
-  validateInternship  // ✅ validateInternship (pas validateIntership)
+  validateInternship,
+  updateApplicationStatus  // ✅ validateInternship (pas validateIntership)
 };

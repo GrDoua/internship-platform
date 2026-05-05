@@ -381,10 +381,9 @@ const deleteOffer = async (req, res) => {
       return res.status(404).json({ message: 'Offre non trouvée' });
     }
     
-    // Supprimer d'abord les candidatures liées à cette offre
-    await Application.destroy({ where: { offreId: offer.id } });
+    // ✅ Utiliser 'offerId' exactement comme dans la base
+    await Application.destroy({ where: { offerId: offer.id } });
     
-    // Puis supprimer l'offre
     await offer.destroy();
     
     res.json({
@@ -392,7 +391,7 @@ const deleteOffer = async (req, res) => {
       message: 'Offre supprimée avec succès'
     });
   } catch (error) {
-    console.error('Erreur suppression offre:', error);
+    console.error('❌ Erreur suppression offre:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -507,80 +506,48 @@ const getCompanyApplications = async (req, res) => {
   }
 };
 
-// @desc    Mettre à jour le statut d'une candidature (accepter/refuser)
-// @route   PUT /api/companies/applications/:id/status
-// @access  Private (Entreprise)
-// @desc    Mettre à jour le statut d'une candidature (accepter/refuser)
-// @route   PUT /api/companies/applications/:id/status
-// @access  Private (Entreprise)
+// companyController.js - updateApplicationStatus (entreprise)
 const updateApplicationStatus = async (req, res) => {
   try {
-    console.log("🔄 Mise à jour du statut de candidature...");
-    console.log("Application ID:", req.params.id);
-    console.log("User ID:", req.user?.id);
-    
-    if (!req.user || !req.user.id) {
-      return res.status(401).json({ message: 'Utilisateur non authentifié' });
-    }
-    
     const { status } = req.body;
     const applicationId = req.params.id;
     
-    if (!status || !['en_attente', 'acceptee', 'refusee'].includes(status)) {
-      return res.status(400).json({ message: 'Statut invalide' });
+    // ✅ L'entreprise peut seulement passer de 'en_attente' à 'accepte_entreprise'
+    if (status === 'accepte_entreprise') {
+      const application = await Application.findByPk(applicationId);
+      if (!application) {
+        return res.status(404).json({ message: 'Candidature non trouvée' });
+      }
+      
+      // Vérifier que l'entreprise est bien propriétaire
+      const offer = await Offer.findByPk(application.offerId);
+      const company = await Company.findOne({ where: { userId: req.user.id } });
+      
+      if (offer.entrepriseId !== company.id) {
+        return res.status(403).json({ message: 'Non autorisé' });
+      }
+      
+      await application.update({ 
+        statut: 'accepte_entreprise',
+        examineLe: new Date()
+      });
+      
+      return res.json({ 
+        success: true, 
+        message: 'Candidature acceptée par l\'entreprise, en attente de validation universitaire' 
+      });
     }
     
-    // 🔧 Version simplifiée - Vérifier étape par étape
-    // 1. Récupérer la candidature
-    const application = await Application.findByPk(applicationId);
-    
-    if (!application) {
-      console.log("❌ Candidature non trouvée");
-      return res.status(404).json({ message: 'Candidature non trouvée' });
+    // L'entreprise peut aussi refuser
+    if (status === 'refusee') {
+      await application.update({ statut: 'refusee', examineLe: new Date() });
+      return res.json({ success: true, message: 'Candidature refusée' });
     }
     
-    console.log("✅ Candidature trouvée:", application.id);
+    return res.status(400).json({ message: 'Action non autorisée' });
     
-    // 2. Récupérer l'offre liée
-    const offer = await Offer.findByPk(application.offerId);
-    
-    if (!offer) {
-      console.log("❌ Offre non trouvée");
-      return res.status(404).json({ message: 'Offre non trouvée' });
-    }
-    
-    console.log("✅ Offre trouvée:", offer.id, "EntrepriseId:", offer.entrepriseId);
-    
-    // 3. Vérifier que l'entreprise possède cette offre
-    const company = await Company.findOne({ 
-      where: { 
-        id: offer.entrepriseId,
-        userId: req.user.id 
-      } 
-    });
-    
-    if (!company) {
-      console.log("❌ Entreprise non autorisée");
-      return res.status(403).json({ message: 'Vous n\'êtes pas autorisé à modifier cette candidature' });
-    }
-    
-    console.log("✅ Entreprise autorisée:", company.id);
-    
-    // 4. Mettre à jour le statut
-    await application.update({ 
-      statut: status,
-      examineLe: new Date()
-    });
-    
-    console.log(`✅ Candidature ${applicationId} mise à jour: ${status}`);
-    
-    res.json({
-      success: true,
-      message: `Candidature ${status === 'acceptee' ? 'acceptée' : 'refusée'} avec succès`,
-      application
-    });
   } catch (error) {
-    console.error("❌ Erreur updateApplicationStatus:", error);
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };

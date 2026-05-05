@@ -16,12 +16,14 @@ const {
   getAllStudents,
   getAllCompanies,
   toggleUserStatus,
+  refuseApplication,
   deleteOfferByAdmin,
   generateConvention,
   // Gestion candidatures
   getAllApplications,
   validateInternship,
-  uploadConvention  // ← Ajoute cette fonction
+  uploadConvention ,
+  updateApplicationStatus // ← Ajoute cette fonction
 } = require('../controllers/adminController');
 
 // ========== PROFIL ADMIN ==========
@@ -38,7 +40,10 @@ router.get('/applications', protect, isAdmin, getAllApplications);
 router.put('/validate/:applicationId', protect, isAdmin, validateInternship);
 // Route pour uploader la convention
 router.post('/applications/:applicationId/convention', protect, isAdmin, uploadConventionPDF, handleMulterError, uploadConvention);
-
+// adminRoutes.js - Ajoute cette ligne avec les autres routes
+router.put('/applications/:id/status', protect, isAdmin, updateApplicationStatus);
+// adminRoutes.js
+router.put('/applications/:id/refuse', protect, isAdmin, refuseApplication);
 // ========== GESTION UTILISATEURS ==========
 router.get('/students', protect, isAdmin, getAllStudents);
 router.get('/companies', protect, isAdmin, getAllCompanies);
