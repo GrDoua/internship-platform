@@ -99,6 +99,7 @@ const getMyApplications = async (req, res) => {
         statut: app.statut,
         message: app.message,
         date: app.createdAt,
+        conventionPath: app.conventionPath,
         offreTitre: offer ? offer.titre : 'Offre inconnue',
         entrepriseNom: offer ? offer.entreprise : 'Entreprise inconnue',
         lieu: offer ? offer.lieu : 'Non spécifié',

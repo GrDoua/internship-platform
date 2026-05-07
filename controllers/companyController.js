@@ -487,6 +487,7 @@ const getCompanyApplications = async (req, res) => {
         email: user ? user.email : 'Non renseigné',
         telephone: student?.telephone || 'Non renseigné',
         statut: app.statut,
+        conventionPath: app.conventionPath,
         message: app.message || '',
         date: app.createdAt,
         cvPath: app.cvPath,
@@ -507,26 +508,31 @@ const getCompanyApplications = async (req, res) => {
 };
 
 // companyController.js - updateApplicationStatus (entreprise)
+// controllers/companyController.js
 const updateApplicationStatus = async (req, res) => {
   try {
     const { status } = req.body;
-    const applicationId = req.params.id;
+    const applicationId = req.params.id;  // ← Note: c'est 'id' pas 'applicationId'
+    
+    console.log("📝 Mise à jour statut:", { applicationId, status });
+    
+    // ✅ CORRECTION: Récupérer la candidature AVANT de l'utiliser
+    const application = await Application.findByPk(applicationId);
+    
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    
+    // Vérifier que l'entreprise est bien propriétaire
+    const offer = await Offer.findByPk(application.offerId);
+    const company = await Company.findOne({ where: { userId: req.user.id } });
+    
+    if (!offer || offer.entrepriseId !== company.id) {
+      return res.status(403).json({ message: 'Non autorisé' });
+    }
     
     // ✅ L'entreprise peut seulement passer de 'en_attente' à 'accepte_entreprise'
     if (status === 'accepte_entreprise') {
-      const application = await Application.findByPk(applicationId);
-      if (!application) {
-        return res.status(404).json({ message: 'Candidature non trouvée' });
-      }
-      
-      // Vérifier que l'entreprise est bien propriétaire
-      const offer = await Offer.findByPk(application.offerId);
-      const company = await Company.findOne({ where: { userId: req.user.id } });
-      
-      if (offer.entrepriseId !== company.id) {
-        return res.status(403).json({ message: 'Non autorisé' });
-      }
-      
       await application.update({ 
         statut: 'accepte_entreprise',
         examineLe: new Date()
@@ -540,14 +546,17 @@ const updateApplicationStatus = async (req, res) => {
     
     // L'entreprise peut aussi refuser
     if (status === 'refusee') {
-      await application.update({ statut: 'refusee', examineLe: new Date() });
+      await application.update({ 
+        statut: 'refusee', 
+        examineLe: new Date() 
+      });
       return res.json({ success: true, message: 'Candidature refusée' });
     }
     
     return res.status(400).json({ message: 'Action non autorisée' });
     
   } catch (error) {
-    console.error(error);
+    console.error("❌ Erreur updateApplicationStatus:", error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -818,12 +827,146 @@ const getAdvancedStats = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-// ========== TÉLÉCHARGER LE CV D'UN CANDIDAT ==========
+// controllers/companyController.js
 const getStudentCV = async (req, res) => {
   try {
     const { applicationId } = req.params;
     
-    console.log("📥 Téléchargement CV - Application ID:", applicationId);
+    console.log("📥 ===== DÉBUT TÉLÉCHARGEMENT CV =====");
+    console.log("📥 Application ID reçu:", applicationId);
+    
+    // 1. Vérification token/user
+    if (!req.user || !req.user.id) {
+      console.error("❌ Utilisateur non authentifié");
+      return res.status(401).json({ message: 'Utilisateur non authentifié' });
+    }
+    console.log("✅ Utilisateur ID:", req.user.id);
+    
+    // 2. Récupérer l'entreprise
+    const company = await Company.findOne({ where: { userId: req.user.id } });
+    if (!company) {
+      console.error("❌ Entreprise non trouvée");
+      return res.status(404).json({ message: 'Profil entreprise non trouvé' });
+    }
+    console.log("✅ Entreprise trouvée - ID:", company.id);
+    
+    // 3. Récupérer la candidature
+    const application = await Application.findByPk(applicationId);
+    if (!application) {
+      console.error("❌ Candidature non trouvée pour ID:", applicationId);
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    console.log("✅ Candidature trouvée - offerId:", application.offerId, "studentId:", application.studentId);
+    
+    // 4. Vérifier que l'offre appartient à l'entreprise
+    const offer = await Offer.findByPk(application.offerId);
+    if (!offer) {
+      console.error("❌ Offre non trouvée");
+      return res.status(404).json({ message: 'Offre non trouvée' });
+    }
+    console.log("✅ Offre trouvée - entrepriseId:", offer.entrepriseId);
+    
+    if (offer.entrepriseId !== company.id) {
+      console.error("❌ Non autorisé - offre.entrepriseId:", offer.entrepriseId, "company.id:", company.id);
+      return res.status(403).json({ message: 'Accès non autorisé à ce CV' });
+    }
+    console.log("✅ Autorisation OK");
+    
+    // 5. Récupérer l'étudiant
+    const student = await Student.findByPk(application.studentId);
+    if (!student) {
+      console.error("❌ Étudiant non trouvé pour ID:", application.studentId);
+      return res.status(404).json({ message: 'Étudiant non trouvé' });
+    }
+    console.log("✅ Étudiant trouvé:", student.prenom, student.nom);
+    console.log("📁 cvPath dans DB:", student.cvPath);
+    
+    // 6. Vérifier si cvPath existe
+    if (!student.cvPath) {
+      console.error("❌ Pas de cvPath dans la base de données");
+      return res.status(404).json({ message: 'Aucun CV trouvé pour cet étudiant' });
+    }
+    
+    // 7. Chercher le fichier dans plusieurs emplacements possibles
+    const fs = require('fs');
+    const path = require('path');
+    
+    // Chemins possibles selon ta structure
+    const possiblePaths = [
+      path.join(__dirname, '../uploads/cvs', student.cvPath),      // uploads/cvs/fichier.pdf
+      path.join(__dirname, '../uploads', student.cvPath),          // uploads/fichier.pdf
+      path.join(__dirname, '../uploads/cv', student.cvPath),       // uploads/cv/fichier.pdf
+      path.join(process.cwd(), 'uploads', 'cvs', student.cvPath),  // depuis racine
+      path.join(process.cwd(), 'uploads', student.cvPath),         // depuis racine
+    ];
+    
+    // Ajouter le chemin absolu si cvPath contient déjà un chemin
+    if (student.cvPath.includes(':') || student.cvPath.startsWith('/')) {
+      possiblePaths.unshift(student.cvPath);
+    }
+    
+    let cvFullPath = null;
+    for (const testPath of possiblePaths) {
+      console.log("🔍 Test chemin:", testPath);
+      if (fs.existsSync(testPath)) {
+        cvFullPath = testPath;
+        console.log("✅ CV trouvé au chemin:", cvFullPath);
+        break;
+      }
+    }
+    
+    if (!cvFullPath) {
+      console.error("❌ CV introuvable - Tous les chemins échoués");
+      
+      // Lister les dossiers pour debug
+      const uploadsDir = path.join(__dirname, '../uploads');
+      if (fs.existsSync(uploadsDir)) {
+        console.log("📁 Contenu du dossier uploads:", fs.readdirSync(uploadsDir));
+        
+        const cvsDir = path.join(uploadsDir, 'cvs');
+        if (fs.existsSync(cvsDir)) {
+          console.log("📁 Contenu du dossier uploads/cvs:", fs.readdirSync(cvsDir));
+        }
+      }
+      
+      return res.status(404).json({ 
+        message: 'Fichier CV introuvable sur le serveur',
+        debug: { 
+          cvPathInDB: student.cvPath,
+          searchedPaths: possiblePaths 
+        }
+      });
+    }
+    
+    // 8. Envoyer le fichier
+    const fileName = student.cvName || `CV_${student.prenom || 'Candidat'}_${student.nom || 'Inconnu'}.pdf`;
+    console.log("📤 Envoi du fichier:", fileName);
+    
+    res.download(cvFullPath, fileName, (err) => {
+      if (err) {
+        console.error("❌ Erreur lors du téléchargement:", err);
+        if (!res.headersSent) {
+          res.status(500).json({ message: 'Erreur lors du téléchargement du CV' });
+        }
+      } else {
+        console.log("✅ CV téléchargé avec succès!");
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Erreur getStudentCV:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+};
+// ========== TÉLÉCHARGER LA CONVENTION DE STAGE ==========
+// ========== TÉLÉCHARGER LA CONVENTION DE STAGE ==========
+const downloadCompanyConvention = async (req, res) => {
+  try {
+    const { candidatureId } = req.params;
+    
+    console.log("📥 Téléchargement convention - Candidature ID:", candidatureId);
     
     if (!req.user || !req.user.id) {
       return res.status(401).json({ message: 'Utilisateur non authentifié' });
@@ -836,7 +979,7 @@ const getStudentCV = async (req, res) => {
     }
     
     // 2. Récupérer la candidature
-    const application = await Application.findByPk(applicationId);
+    const application = await Application.findByPk(candidatureId);
     if (!application) {
       return res.status(404).json({ message: 'Candidature non trouvée' });
     }
@@ -844,50 +987,70 @@ const getStudentCV = async (req, res) => {
     // 3. Vérifier que cette candidature appartient bien à une offre de l'entreprise
     const offer = await Offer.findByPk(application.offerId);
     if (!offer || offer.entrepriseId !== company.id) {
-      return res.status(403).json({ message: 'Accès non autorisé à ce CV' });
+      return res.status(403).json({ message: 'Accès non autorisé à cette convention' });
     }
     
-    // 4. Récupérer l'étudiant et son CV
-    const student = await Student.findByPk(application.studentId);
-    if (!student || !student.cvPath) {
-      return res.status(404).json({ message: 'CV non trouvé' });
+    // 4. Vérifier que la candidature est acceptée (validée par l'admin)
+    if (application.statut !== 'accepte_universite' && application.statut !== 'acceptee') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'La convention n\'est disponible que pour les candidatures acceptées' 
+      });
     }
     
-    console.log("📁 cvPath stocké dans Student:", student.cvPath);
+    // 5. Récupérer le chemin de la convention - Utiliser conventionPath (camelCase)
+    const conventionPath = application.conventionPath;  // ← Changé ici !
     
-    // 5. Construire le chemin complet du fichier en utilisant le même dossier que cvController
+    console.log("📁 conventionPath trouvé:", conventionPath);
+    
+    if (!conventionPath) {
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Convention non trouvée' 
+      });
+    }
+    
+    // 6. Construire le chemin complet du fichier
     const fs = require('fs');
+    const UPLOADS_DIR = path.join(__dirname, '../uploads/conventions');
+    const conventionFullPath = path.join(UPLOADS_DIR, conventionPath);
     
-    // Utiliser le même chemin que dans cvController
-    const UPLOADS_DIR = path.join(__dirname, '../uploads/cvs');
-    const cvFullPath = path.join(UPLOADS_DIR, student.cvPath);
+    console.log("📁 Chemin complet:", conventionFullPath);
+    console.log("📁 Le fichier existe?", fs.existsSync(conventionFullPath));
     
-    console.log("📁 Chemin complet du CV:", cvFullPath);
-    console.log("📁 Le fichier existe?", fs.existsSync(cvFullPath));
-    
-    // 6. Vérifier si le fichier existe
-    if (!fs.existsSync(cvFullPath)) {
-      console.log("❌ Fichier introuvable au chemin:", cvFullPath);
-      return res.status(404).json({ message: 'Fichier CV introuvable sur le serveur' });
+    // 7. Vérifier si le fichier existe physiquement
+    if (!fs.existsSync(conventionFullPath)) {
+      console.log("❌ Fichier introuvable");
+      return res.status(404).json({ 
+        success: false, 
+        message: 'Fichier de convention introuvable sur le serveur' 
+      });
     }
     
-    // 7. Envoyer le fichier pour téléchargement
-    const fileName = student.cvName || `CV_${student.prenom || 'Candidat'}_${student.nom || 'Inconnu'}.pdf`;
+    // 8. Récupérer les informations de l'étudiant
+    const student = await Student.findByPk(application.studentId);
+    const fileName = `Convention_${student?.prenom || 'Etudiant'}_${student?.nom || 'Inconnu'}.pdf`;
     
-    res.download(cvFullPath, fileName, (err) => {
-      if (err) {
-        console.error("❌ Erreur lors du téléchargement:", err);
-        if (!res.headersSent) {
-          res.status(500).json({ message: 'Erreur lors du téléchargement du CV' });
-        }
-      } else {
-        console.log("✅ CV téléchargé avec succès:", fileName);
+    // 9. Envoyer le fichier
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(fileName)}"`);
+    
+    const fileStream = fs.createReadStream(conventionFullPath);
+    fileStream.pipe(res);
+    
+    fileStream.on('error', (err) => {
+      console.error("❌ Erreur stream:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Erreur lors de l\'envoi de la convention' });
       }
     });
     
   } catch (error) {
-    console.error("❌ Erreur getStudentCV:", error);
-    res.status(500).json({ message: error.message });
+    console.error("❌ Erreur downloadConvention:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
   }
 };
 
@@ -907,6 +1070,7 @@ module.exports = {
   updateApplicationStatus,
   saveEvaluation,  // ← AJOUTE CETTE LIGNE
   getAdvancedStats,
-  getStudentCV
+  getStudentCV,
+  downloadCompanyConvention
 };
 

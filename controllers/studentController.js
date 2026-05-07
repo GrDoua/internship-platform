@@ -227,7 +227,7 @@ const getStudentEvaluations = async (req, res) => {
 };
 // ========== TÉLÉCHARGER LA CONVENTION ==========
 // ========== TÉLÉCHARGER LA CONVENTION ==========
-const downloadConvention = async (req, res) => {
+const downloadStudentConvention = async (req, res) => {
   try {
     const { applicationId } = req.params;
     const userId = req.user.id;
@@ -306,6 +306,6 @@ module.exports = {
   updateStudentProfile,
   updateSkills,
   uploadStudentPhoto,
-  downloadConvention,
+  downloadStudentConvention,
   getStudentEvaluations  // ← Assure-toi que cette ligne existe
 };

@@ -19,7 +19,8 @@ const {
   updateApplicationStatus,
   saveEvaluation,
   getAdvancedStats,
-  getStudentCV
+  getStudentCV,
+  downloadCompanyConvention
 } = require('../controllers/companyController');
 
 // ========== PROFIL ==========
@@ -46,6 +47,8 @@ router.patch('/offers/:id/status', protect, isCompany, updateOfferStatus);
 // ========== CANDIDATURES ==========
 router.get('/applications', protect, isCompany, getCompanyApplications);
 router.put('/applications/:id/status', protect, isCompany, updateApplicationStatus);
+// GET /api/companies/candidatures/:candidatureId/convention
+router.get('/candidatures/:candidatureId/convention',protect, isCompany,downloadCompanyConvention);
 
 // ========== ÉVALUATIONS ==========
 // ✅ Correction : utiliser 'applicationId' comme nom de paramètre

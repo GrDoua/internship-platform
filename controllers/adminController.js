@@ -1,6 +1,9 @@
 const { User, Admin, Student, Company, Offer, Application } = require('../models');  // ← أضفنا Student, Company, Offer, Application
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 // ========== 1. RÉCUPÉRER PROFIL ADMIN ==========
 // adminController.js - getAdminProfile
@@ -410,6 +413,7 @@ const getAllApplications = async (req, res) => {
   }
 };
 // adminController.js - validateInternship (admin valide avec convention)
+// adminController.js - validateInternship (admin valide avec convention)
 const validateInternship = async (req, res) => {
   try {
     const { applicationId } = req.params;
@@ -426,11 +430,35 @@ const validateInternship = async (req, res) => {
       });
     }
     
-    // ✅ Passer à 'accepte_universite' (validation finale)
+    // ✅ Ici, il faut soit uploader un fichier, soit générer automatiquement
+    let conventionPath = null;
+    
+    // Option 1: S'il y a un fichier uploadé (via multer)
+    if (req.file) {
+      conventionPath = req.file.filename;
+      console.log("📁 Convention uploadée:", conventionPath);
+    }
+    
+    // Option 2: Générer un nom de convention automatiquement
+    const student = await Student.findByPk(application.studentId);
+    const offer = await Offer.findByPk(application.offerId);
+    const company = await Company.findByPk(offer?.entrepriseId);
+    
+    if (!conventionPath && student && offer && company) {
+      // Générer un nom de fichier par défaut
+      const date = new Date();
+      conventionPath = `convention_${student.nom}_${student.prenom}_${company.nom}_${date.getFullYear()}.pdf`;
+      console.log("📁 Convention générée automatiquement:", conventionPath);
+    }
+    
+    // ✅ Mettre à jour avec le chemin de la convention
     await application.update({ 
       statut: 'accepte_universite',
+      conventionPath: conventionPath,  // ← AJOUTE CETTE LIGNE !
+      conventionName: `Convention_${student?.prenom || ''}_${student?.nom || ''}.pdf`,
       valideParAdmin: true,
-      examineLe: new Date()
+      examineLe: new Date(),
+      conventionUploadedAt: conventionPath ? new Date() : null
     });
     
     // Mettre à jour l'étudiant comme placé
@@ -441,8 +469,10 @@ const validateInternship = async (req, res) => {
     
     res.json({
       success: true,
-      message: 'Stage validé par l\'université, convention acceptée'
+      message: 'Stage validé par l\'université, convention acceptée',
+      conventionPath: conventionPath
     });
+    
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: error.message });
@@ -512,36 +542,27 @@ const uploadConvention = async (req, res) => {
   }
 };
 
-// En haut du fichier, ajoute les imports nécessaires
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
+
 
 // ========== 13. GÉNÉRER CONVENTION PDF ==========
+// adminController.js - Version complète avec toutes les infos du candidat
 const generateConvention = async (req, res) => {
   try {
     const { applicationId } = req.params;
-    console.log("📝 Génération convention pour candidature:", applicationId);
+    console.log("📝 Génération convention personnalisée pour candidature:", applicationId);
     
-    // Récupérer la candidature avec toutes les infos
+    // Récupérer TOUTES les infos
     const application = await Application.findByPk(applicationId, {
       include: [
         { 
           model: Student, 
           as: 'student',
-          include: [{ 
-            model: User, 
-            as: 'user',
-            attributes: ['id', 'email']
-          }]
+          include: [{ model: User, as: 'user' }]
         },
         { 
           model: Offer, 
           as: 'offer',
-          include: [{ 
-            model: Company, 
-            as: 'company'
-          }]
+          include: [{ model: Company, as: 'company' }]
         }
       ]
     });
@@ -555,43 +576,163 @@ const generateConvention = async (req, res) => {
     const company = offer?.company;
     
     if (!student || !offer || !company) {
-      return res.status(400).json({ message: 'Informations manquantes pour générer la convention' });
+      return res.status(400).json({ 
+        message: 'Informations manquantes', 
+        details: { student: !!student, offer: !!offer, company: !!company }
+      });
     }
     
-    // ✅ AJOUTE CETTE LIGNE - Changer le statut avant de générer le PDF
-    await application.update({ statut: 'accepte_universite' });
-    console.log(`✅ Statut de la candidature ${applicationId} mis à jour vers accepte_universite`);
+    console.log("✅ Génération pour:", student.prenom, student.nom);
+    console.log("   Entreprise:", company.nom);
+    console.log("   Offre:", offer.titre);
     
-    // Créer le dossier conventions s'il n'existe pas
+    // Créer le dossier
     const conventionsDir = path.join(__dirname, '../uploads/conventions');
     if (!fs.existsSync(conventionsDir)) {
       fs.mkdirSync(conventionsDir, { recursive: true });
     }
     
-    // Nom du fichier
+    // Nom du fichier avec le nom du candidat
     const fileName = `convention_${student.nom}_${student.prenom}_${company.nom}_${Date.now()}.pdf`;
     const filePath = path.join(conventionsDir, fileName);
     
-    // Créer le PDF
+    // Créer le PDF personnalisé
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const writeStream = fs.createWriteStream(filePath);
     doc.pipe(writeStream);
     
-    // ... le reste de ton code de génération PDF (en-tête, contenu, signatures) ...
+    // ========== CONTENU PERSONNALISÉ ==========
+    // En-tête
+    doc.fontSize(20)
+       .font('Helvetica-Bold')
+       .fillColor('#1a365d')
+       .text('CONVENTION DE STAGE', { align: 'center' });
     
-    // Finaliser le PDF
+    doc.moveDown();
+    doc.fontSize(10)
+       .font('Helvetica')
+       .fillColor('black')
+       .text(`Fait à ${company.localisation || 'Alger'}, le ${new Date().toLocaleDateString('fr-FR')}`, { align: 'right' });
+    
+    doc.moveDown(2);
+    
+    // ========== PARTIES ==========
+    doc.fontSize(14)
+       .font('Helvetica-Bold')
+       .text('ENTRE LES SOUSSIGNÉS :', { underline: true });
+    
+    doc.moveDown();
+    doc.fontSize(11)
+       .font('Helvetica');
+    
+    // Entreprise
+    doc.text(`La société ${company.nom},`);
+    doc.text(`Dont le siège social est situé à : ${company.localisation || offer.lieu || 'Non spécifié'}`);
+    doc.text(`Représentée par son représentant légal,`);
+    doc.text(`Ci-après dénommée "L'Entreprise d'accueil"`);
+    
+    doc.moveDown(1.5);
+    
+    // Étudiant
+    doc.text(`L'étudiant(e) ${student.prenom || ''} ${student.nom},`);
+    doc.text(`Né(e) le : ${student.dateNaissance || '___/___/____'}`);
+    doc.text(`Étudiant(e) à : ${student.universite || 'Université'}`);
+    doc.text(`Email : ${student.user?.email || 'Non renseigné'}`);
+    doc.text(`Téléphone : ${student.telephone || 'Non renseigné'}`);
+    doc.text(`Ci-après dénommé(e) "Le/La Stagiaire"`);
+    
+    doc.moveDown(1.5);
+    
+    // Université
+    doc.text(`L'établissement ${student.universite || 'Université'},`);
+    doc.text(`Représenté par son responsable de stage,`);
+    doc.text(`Ci-après dénommé "L'Établissement"`);
+    
+    doc.moveDown(2);
+    
+    // ========== ARTICLE 1 : OBJET ==========
+    doc.fontSize(11)
+       .font('Helvetica-Bold')
+       .text('Article 1 : Objet du stage', { underline: true });
+    
+    doc.moveDown(0.5);
+    doc.font('Helvetica')
+       .text(`La présente convention a pour objet de définir les conditions dans lesquelles ${student.prenom || ''} ${student.nom} effectuera son stage au sein de ${company.nom}.`);
+    
+    doc.moveDown();
+    
+    // ========== ARTICLE 2 : DURÉE ==========
+    doc.font('Helvetica-Bold')
+       .text('Article 2 : Durée du stage', { underline: true });
+    
+    doc.moveDown(0.5);
+    doc.font('Helvetica')
+       .text(`Le stage d'une durée de ${offer.duree || 'à déterminer'} débutera le ${offer.dateDebut ? new Date(offer.dateDebut).toLocaleDateString('fr-FR') : '___/___/____'} et se terminera le ${offer.dateFin ? new Date(offer.dateFin).toLocaleDateString('fr-FR') : '___/___/____'}.`);
+    
+    doc.moveDown();
+    
+    // ========== ARTICLE 3 : MISSIONS ==========
+    doc.font('Helvetica-Bold')
+       .text('Article 3 : Missions confiées', { underline: true });
+    
+    doc.moveDown(0.5);
+    doc.font('Helvetica')
+       .text(offer.description || 'Description des missions à préciser par l\'entreprise.');
+    
+    doc.moveDown();
+    
+    // ========== ARTICLE 4 : GRATIFICATION ==========
+    doc.font('Helvetica-Bold')
+       .text('Article 4 : Gratification', { underline: true });
+    
+    doc.moveDown(0.5);
+    const gratification = (offer.salaire && offer.salaire !== 'Non spécifié') ? offer.salaire : 'Stage non rémunéré';
+    doc.font('Helvetica')
+       .text(gratification);
+    
+    doc.moveDown(2);
+    
+    // ========== SIGNATURES ==========
+    doc.fontSize(11)
+       .font('Helvetica-Bold')
+       .text('SIGNATURES', { align: 'center', underline: true });
+    
+    doc.moveDown(2);
+    
+    const pageWidth = doc.page.width - 100;
+    const signatureY = doc.y;
+    
+    doc.fontSize(10)
+       .font('Helvetica')
+       .text('Pour l\'Entreprise :', 50, signatureY);
+    doc.text('Pour l\'Établissement :', 50 + (pageWidth / 2), signatureY);
+    
+    doc.moveDown(3);
+    doc.text('(Signature précédée de la mention "Lu et approuvé")', 50, doc.y);
+    doc.text('(Signature précédée de la mention "Lu et approuvé")', 50 + (pageWidth / 2), doc.y - 24);
+    
+    doc.moveDown(2);
+    doc.font('Helvetica-Bold')
+       .text(`Cachet de l'entreprise`, 50, doc.y);
+    
+    // Finaliser
     doc.end();
     
-    // Attendre que le PDF soit écrit
     writeStream.on('finish', async () => {
-      // Sauvegarder le chemin dans la base de données
+      const stats = fs.statSync(filePath);
+      console.log(`✅ PDF généré: ${fileName} (${stats.size} bytes)`);
+      
+      // Sauvegarder dans la base
       await application.update({
         conventionPath: fileName,
         conventionName: `Convention_${student.nom}_${student.prenom}.pdf`,
-        conventionUploadedAt: new Date()
+        conventionUploadedAt: new Date(),
+        statut: 'accepte_universite'
       });
       
-      // Envoyer le PDF en réponse
+      await Student.update({ estPlace: true }, { where: { id: student.id } });
+      
+      // Envoyer le PDF
       const pdfBuffer = fs.readFileSync(filePath);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
@@ -599,8 +740,8 @@ const generateConvention = async (req, res) => {
     });
     
     writeStream.on('error', (error) => {
-      console.error("❌ Erreur écriture PDF:", error);
-      res.status(500).json({ message: 'Erreur lors de la génération du PDF' });
+      console.error("❌ Erreur:", error);
+      res.status(500).json({ message: error.message });
     });
     
   } catch (error) {
@@ -608,6 +749,76 @@ const generateConvention = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+// ========== TÉLÉCHARGER CONVENTION EXISTANTE ==========
+const downloadAdminConvention = async (req, res) => {
+  try {
+    const { applicationId } = req.params;
+    console.log("📥 Téléchargement convention pour candidature:", applicationId);
+    
+    // 1. Vérifier que l'admin est connecté
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'Non authentifié' });
+    }
+    
+    // 2. Récupérer la candidature
+    const application = await Application.findByPk(applicationId, {
+      include: [
+        { model: Student, as: 'student' },
+        { model: Offer, as: 'offer' }
+      ]
+    });
+    
+    if (!application) {
+      return res.status(404).json({ message: 'Candidature non trouvée' });
+    }
+    
+    // 3. Vérifier que la convention existe dans la base
+    if (!application.conventionPath) {
+      return res.status(404).json({ message: 'Aucune convention générée pour cette candidature' });
+    }
+    
+    // 4. Construire le chemin du fichier
+    const conventionsDir = path.join(__dirname, '../uploads/conventions');
+    const filePath = path.join(conventionsDir, application.conventionPath);
+    
+    console.log("📁 Chemin du fichier:", filePath);
+    
+    // 5. Vérifier que le fichier existe physiquement
+    if (!fs.existsSync(filePath)) {
+      console.error("❌ Fichier introuvable:", filePath);
+      return res.status(404).json({ 
+        message: 'Fichier convention introuvable sur le serveur',
+        path: application.conventionPath
+      });
+    }
+    
+    // 6. Récupérer les infos pour le nom du fichier
+    const student = application.student;
+    const fileName = application.conventionName || `Convention_${student?.nom || 'Stagiaire'}_${student?.prenom || ''}.pdf`;
+    
+    console.log("✅ Fichier trouvé, envoi en cours...");
+    
+    // 7. Envoyer le fichier pour téléchargement
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileName)}"`);
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+    
+    fileStream.on('error', (error) => {
+      console.error("❌ Erreur stream:", error);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Erreur lors de l\'envoi du fichier' });
+      }
+    });
+    
+  } catch (error) {
+    console.error("❌ Erreur downloadConvention:", error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+
 
 // adminController.js
 // adminController.js - updateApplicationStatus (amélioré)
@@ -697,5 +908,6 @@ toggleUserStatus,
   uploadConvention,
   getAllApplications,
   validateInternship,
-  updateApplicationStatus  // ✅ validateInternship (pas validateIntership)
+  updateApplicationStatus,
+  downloadAdminConvention  // ✅ validateInternship (pas validateIntership)
 };

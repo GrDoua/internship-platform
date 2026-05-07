@@ -23,7 +23,8 @@ const {
   getAllApplications,
   validateInternship,
   uploadConvention ,
-  updateApplicationStatus // ← Ajoute cette fonction
+  updateApplicationStatus ,
+  downloadAdminConvention// ← Ajoute cette fonction
 } = require('../controllers/adminController');
 
 // ========== PROFIL ADMIN ==========
@@ -31,6 +32,8 @@ router.get('/profile', protect, isAdmin, getAdminProfile);
 router.put('/profile', protect, isAdmin, updateAdminProfile);
 router.post('/upload-photo', protect, isAdmin, uploadPhoto, handleMulterError, uploadAdminPhoto);
 router.put('/change-password', protect, isAdmin, changeAdminPassword);
+// ========== TÉLÉCHARGER CONVENTION ==========
+router.get('/applications/:applicationId/download-convention', protect, isAdmin, downloadAdminConvention);
 
 // ========== STATISTIQUES ==========
 router.get('/stats', protect, isAdmin, getStatistics);
