@@ -544,26 +544,17 @@ const uploadConvention = async (req, res) => {
 
 
 
-// ========== 13. GÉNÉRER CONVENTION PDF ==========
-// adminController.js - Version complète avec toutes les infos du candidat
+// adminController.js - Remplace la fonction generateConvention par celle-ci
+
 const generateConvention = async (req, res) => {
   try {
     const { applicationId } = req.params;
-    console.log("📝 Génération convention personnalisée pour candidature:", applicationId);
+    console.log("📝 Génération convention pour candidature:", applicationId);
     
-    // Récupérer TOUTES les infos
     const application = await Application.findByPk(applicationId, {
       include: [
-        { 
-          model: Student, 
-          as: 'student',
-          include: [{ model: User, as: 'user' }]
-        },
-        { 
-          model: Offer, 
-          as: 'offer',
-          include: [{ model: Company, as: 'company' }]
-        }
+        { model: Student, as: 'student', include: [{ model: User, as: 'user' }] },
+        { model: Offer, as: 'offer', include: [{ model: Company, as: 'company' }] }
       ]
     });
     
@@ -571,158 +562,103 @@ const generateConvention = async (req, res) => {
       return res.status(404).json({ message: 'Candidature non trouvée' });
     }
     
+    const admin = await Admin.findOne({ where: { userId: req.user.id } });
     const student = application.student;
     const offer = application.offer;
     const company = offer?.company;
     
     if (!student || !offer || !company) {
-      return res.status(400).json({ 
-        message: 'Informations manquantes', 
-        details: { student: !!student, offer: !!offer, company: !!company }
-      });
+      return res.status(400).json({ message: 'Informations manquantes' });
     }
     
-    console.log("✅ Génération pour:", student.prenom, student.nom);
-    console.log("   Entreprise:", company.nom);
-    console.log("   Offre:", offer.titre);
-    
-    // Créer le dossier
     const conventionsDir = path.join(__dirname, '../uploads/conventions');
     if (!fs.existsSync(conventionsDir)) {
       fs.mkdirSync(conventionsDir, { recursive: true });
     }
     
-    // Nom du fichier avec le nom du candidat
     const fileName = `convention_${student.nom}_${student.prenom}_${company.nom}_${Date.now()}.pdf`;
     const filePath = path.join(conventionsDir, fileName);
     
-    // Créer le PDF personnalisé
     const doc = new PDFDocument({ margin: 50, size: 'A4' });
     const writeStream = fs.createWriteStream(filePath);
     doc.pipe(writeStream);
     
-    // ========== CONTENU PERSONNALISÉ ==========
     // En-tête
-    doc.fontSize(20)
-       .font('Helvetica-Bold')
-       .fillColor('#1a365d')
-       .text('CONVENTION DE STAGE', { align: 'center' });
+    doc.fontSize(20).font('Helvetica-Bold').fillColor('#1a365d')
+      .text('CONVENTION DE STAGE', { align: 'center' });
     
     doc.moveDown();
-    doc.fontSize(10)
-       .font('Helvetica')
-       .fillColor('black')
-       .text(`Fait à ${company.localisation || 'Alger'}, le ${new Date().toLocaleDateString('fr-FR')}`, { align: 'right' });
+    doc.fontSize(10).fillColor('black')
+      .text(`Fait à ${company.localisation || 'Alger'}, le ${new Date().toLocaleDateString('fr-FR')}`, { align: 'right' });
     
     doc.moveDown(2);
     
-    // ========== PARTIES ==========
-    doc.fontSize(14)
-       .font('Helvetica-Bold')
-       .text('ENTRE LES SOUSSIGNÉS :', { underline: true });
-    
+    // Parties prenantes
+    doc.fontSize(14).font('Helvetica-Bold').text('ENTRE LES SOUSSIGNÉS :', { underline: true });
     doc.moveDown();
-    doc.fontSize(11)
-       .font('Helvetica');
+    doc.fontSize(11).font('Helvetica');
     
-    // Entreprise
     doc.text(`La société ${company.nom},`);
-    doc.text(`Dont le siège social est situé à : ${company.localisation || offer.lieu || 'Non spécifié'}`);
-    doc.text(`Représentée par son représentant légal,`);
+    doc.text(`Représentée par ${company.representant || 'son représentant légal'},`);
     doc.text(`Ci-après dénommée "L'Entreprise d'accueil"`);
-    
     doc.moveDown(1.5);
     
-    // Étudiant
-    doc.text(`L'étudiant(e) ${student.prenom || ''} ${student.nom},`);
-    doc.text(`Né(e) le : ${student.dateNaissance || '___/___/____'}`);
+    doc.text(`L'étudiant(e) ${student.prenom} ${student.nom},`);
     doc.text(`Étudiant(e) à : ${student.universite || 'Université'}`);
-    doc.text(`Email : ${student.user?.email || 'Non renseigné'}`);
-    doc.text(`Téléphone : ${student.telephone || 'Non renseigné'}`);
     doc.text(`Ci-après dénommé(e) "Le/La Stagiaire"`);
-    
     doc.moveDown(1.5);
     
-    // Université
-    doc.text(`L'établissement ${student.universite || 'Université'},`);
-    doc.text(`Représenté par son responsable de stage,`);
+    const universiteNom = admin?.universite || student.universite || "Université";
+    const responsableNom = admin?.fullName || "Le Responsable des Stages";
+    
+    doc.text(`L'établissement ${universiteNom},`);
+    doc.text(`Représenté par ${responsableNom},`);
     doc.text(`Ci-après dénommé "L'Établissement"`);
-    
     doc.moveDown(2);
     
-    // ========== ARTICLE 1 : OBJET ==========
-    doc.fontSize(11)
-       .font('Helvetica-Bold')
-       .text('Article 1 : Objet du stage', { underline: true });
-    
-    doc.moveDown(0.5);
-    doc.font('Helvetica')
-       .text(`La présente convention a pour objet de définir les conditions dans lesquelles ${student.prenom || ''} ${student.nom} effectuera son stage au sein de ${company.nom}.`);
-    
-    doc.moveDown();
-    
-    // ========== ARTICLE 2 : DURÉE ==========
-    doc.font('Helvetica-Bold')
-       .text('Article 2 : Durée du stage', { underline: true });
-    
-    doc.moveDown(0.5);
-    doc.font('Helvetica')
-       .text(`Le stage d'une durée de ${offer.duree || 'à déterminer'} débutera le ${offer.dateDebut ? new Date(offer.dateDebut).toLocaleDateString('fr-FR') : '___/___/____'} et se terminera le ${offer.dateFin ? new Date(offer.dateFin).toLocaleDateString('fr-FR') : '___/___/____'}.`);
-    
-    doc.moveDown();
-    
-    // ========== ARTICLE 3 : MISSIONS ==========
-    doc.font('Helvetica-Bold')
-       .text('Article 3 : Missions confiées', { underline: true });
-    
-    doc.moveDown(0.5);
-    doc.font('Helvetica')
-       .text(offer.description || 'Description des missions à préciser par l\'entreprise.');
-    
-    doc.moveDown();
-    
-    // ========== ARTICLE 4 : GRATIFICATION ==========
-    doc.font('Helvetica-Bold')
-       .text('Article 4 : Gratification', { underline: true });
-    
-    doc.moveDown(0.5);
-    const gratification = (offer.salaire && offer.salaire !== 'Non spécifié') ? offer.salaire : 'Stage non rémunéré';
-    doc.font('Helvetica')
-       .text(gratification);
-    
-    doc.moveDown(2);
-    
-    // ========== SIGNATURES ==========
-    doc.fontSize(11)
-       .font('Helvetica-Bold')
-       .text('SIGNATURES', { align: 'center', underline: true });
-    
+    // Signatures
+    doc.fontSize(11).font('Helvetica-Bold').text('SIGNATURES', { align: 'center', underline: true });
     doc.moveDown(2);
     
     const pageWidth = doc.page.width - 100;
     const signatureY = doc.y;
     
-    doc.fontSize(10)
-       .font('Helvetica')
-       .text('Pour l\'Entreprise :', 50, signatureY);
-    doc.text('Pour l\'Établissement :', 50 + (pageWidth / 2), signatureY);
+    doc.fontSize(10).font('Helvetica-Bold')
+      .text('Pour l\'Entreprise :', 50, signatureY)
+      .text('Pour l\'Établissement :', 50 + (pageWidth / 2), signatureY);
     
-    doc.moveDown(3);
-    doc.text('(Signature précédée de la mention "Lu et approuvé")', 50, doc.y);
-    doc.text('(Signature précédée de la mention "Lu et approuvé")', 50 + (pageWidth / 2), doc.y - 24);
+    doc.moveDown(1.5);
     
-    doc.moveDown(2);
-    doc.font('Helvetica-Bold')
-       .text(`Cachet de l'entreprise`, 50, doc.y);
+    // Cadre signature entreprise
+    doc.rect(50, doc.y, 180, 60).stroke();
+    doc.fontSize(8).fillColor('gray')
+      .text('Signature et cachet de l\'entreprise', 50 + 10, doc.y + 20, { width: 160, align: 'center' });
     
-    // Finaliser
+    const signatureEtablissementY = doc.y;
+    
+    // 🔥🔥🔥 SIGNATURE AUTOMATIQUE ICI 🔥🔥🔥
+    const signaturePath = path.join(__dirname, '../uploads/signatures/signature_defaut.png');
+    
+    if (fs.existsSync(signaturePath)) {
+      doc.image(signaturePath, 50 + (pageWidth / 2) + 15, signatureEtablissementY, { width: 150, height: 50 });
+      console.log("✅ Signature automatique ajoutée");
+    } else {
+      // Fallback: texte stylisé
+      doc.rect(50 + (pageWidth / 2), signatureEtablissementY, 180, 60).stroke();
+      doc.fontSize(10).font('Courier').fillColor('#1a365d')
+        .text(responsableNom, 50 + (pageWidth / 2) + 20, signatureEtablissementY + 15, { width: 140, align: 'center' });
+      doc.fontSize(7).fillColor('gray')
+        .text('(Signature électronique)', 50 + (pageWidth / 2) + 40, signatureEtablissementY + 40);
+    }
+    
+    doc.moveDown(4);
+    doc.fontSize(9).fillColor('black')
+      .text(`${company.representant || 'Représentant légal'}`, 50, doc.y)
+      .text(`${responsableNom}`, 50 + (pageWidth / 2), doc.y);
+    
     doc.end();
     
     writeStream.on('finish', async () => {
-      const stats = fs.statSync(filePath);
-      console.log(`✅ PDF généré: ${fileName} (${stats.size} bytes)`);
-      
-      // Sauvegarder dans la base
       await application.update({
         conventionPath: fileName,
         conventionName: `Convention_${student.nom}_${student.prenom}.pdf`,
@@ -732,16 +668,10 @@ const generateConvention = async (req, res) => {
       
       await Student.update({ estPlace: true }, { where: { id: student.id } });
       
-      // Envoyer le PDF
       const pdfBuffer = fs.readFileSync(filePath);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.send(pdfBuffer);
-    });
-    
-    writeStream.on('error', (error) => {
-      console.error("❌ Erreur:", error);
-      res.status(500).json({ message: error.message });
     });
     
   } catch (error) {
