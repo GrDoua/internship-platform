@@ -4,7 +4,6 @@ const path = require('path');
 // ⚠️ Corrige le chemin du dossier uploads
 const UPLOADS_DIR = path.join(__dirname, '../uploads/cvs');
 
-
 // @desc    Générer CV à partir des données du profil
 // @route   POST /api/students/generate-cv
 const generateStudentCV = async (req, res) => {
@@ -27,7 +26,8 @@ const generateStudentCV = async (req, res) => {
       experiences,
       formations,
       langues,
-      centresInteret
+      centresInteret,
+      photoUrl
     } = req.body;
     
     // Utiliser les données du profil ou celles envoyées
@@ -40,11 +40,12 @@ const generateStudentCV = async (req, res) => {
       universite: universite || student.universite,
       filiere: filiere || student.filiere,
       niveau: niveau || student.niveau,
-      competences: competences || (student.competences ? JSON.parse(student.competences) : []),
+      competences: competences || (student.competences ? (typeof student.competences === 'string' ? JSON.parse(student.competences) : student.competences) : []),
       experiences: experiences || [],
       formations: formations || [],
       langues: langues || [],
-      centresInteret: centresInteret || []
+      centresInteret: centresInteret || [],
+      photoUrl: photoUrl || (student.photoPath ? `/uploads/student-photos/${student.photoPath}` : null)
     };
     
     // Générer le PDF
@@ -62,18 +63,54 @@ const generateStudentCV = async (req, res) => {
       res.send(pdfData);
     });
     
-    // Titre
+    // === DÉBUT DE LA CONSTRUCTION DU PDF ===
+    
+    // 🔵 TITRE
     doc.fontSize(22).font('Helvetica-Bold').fillColor('#10b981')
       .text('CURRICULUM VITAE', { align: 'center' });
     
     doc.moveDown();
-    doc.fontSize(14).font('Helvetica').fillColor('#333')
-      .text(`${finalData.nom} ${finalData.prenom}`, { align: 'center' });
+    
+    // 🟢 SECTION PHOTO + NOM (côte à côte)
+    let startY = doc.y;
+    
+    // Si une photo existe
+    let photoBuffer = null;
+    if (finalData.photoUrl && finalData.photoUrl.startsWith('http')) {
+      // Si c'est une URL, il faudrait la télécharger... (optionnel)
+      console.log("Photo URL:", finalData.photoUrl);
+    } else if (photoUrl && photoUrl.startsWith('data:image')) {
+      // Convertir base64 en buffer pour l'image
+      const base64Data = photoUrl.split(',')[1];
+      photoBuffer = Buffer.from(base64Data, 'base64');
+    } else if (finalData.photoUrl && finalData.photoUrl.startsWith('/uploads/')) {
+      // Lire le fichier depuis le serveur
+      const photoPath = path.join(__dirname, '..', finalData.photoUrl);
+      if (fs.existsSync(photoPath)) {
+        photoBuffer = fs.readFileSync(photoPath);
+      }
+    }
+    
+    if (photoBuffer) {
+      try {
+        doc.image(photoBuffer, 50, startY, { width: 80, height: 80, fit: [80, 80] });
+        // Ajuster la position du nom pour être à côté de la photo
+        doc.fontSize(14).font('Helvetica').fillColor('#333')
+          .text(`${finalData.nom} ${finalData.prenom}`, 150, startY + 25, { width: 400 });
+      } catch (err) {
+        console.log("Impossible d'ajouter la photo au PDF:", err);
+        doc.fontSize(14).font('Helvetica').fillColor('#333')
+          .text(`${finalData.nom} ${finalData.prenom}`, { align: 'center' });
+      }
+    } else {
+      doc.fontSize(14).font('Helvetica').fillColor('#333')
+        .text(`${finalData.nom} ${finalData.prenom}`, { align: 'center' });
+    }
     
     doc.moveDown(0.5);
     doc.strokeColor('#10b981').lineWidth(1).moveTo(50, doc.y).lineTo(550, doc.y).stroke();
     
-    // Contact
+    // 📞 CONTACT
     doc.moveDown();
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('CONTACT');
     doc.fontSize(10).font('Helvetica').fillColor('#666');
@@ -81,7 +118,7 @@ const generateStudentCV = async (req, res) => {
     doc.text(`Téléphone : ${finalData.telephone || 'Non renseigné'}`, { indent: 10 });
     doc.text(`Adresse : ${finalData.adresse || 'Non renseignée'}`, { indent: 10 });
     
-    // Formation
+    // 🎓 FORMATION
     doc.moveDown();
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('FORMATION');
     doc.fontSize(10).font('Helvetica').fillColor('#666');
@@ -89,17 +126,20 @@ const generateStudentCV = async (req, res) => {
     doc.text(`Filière : ${finalData.filiere || 'Non renseignée'}`, { indent: 10 });
     doc.text(`Niveau : ${finalData.niveau || 'Non renseigné'}`, { indent: 10 });
     
-    // Compétences
+    // 💻 COMPÉTENCES
     doc.moveDown();
     doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('COMPETENCES');
     doc.fontSize(10).font('Helvetica').fillColor('#666');
     if (finalData.competences && finalData.competences.length > 0) {
-      doc.text(finalData.competences.join('  |  '), { indent: 10 });
+      const competencesText = Array.isArray(finalData.competences) 
+        ? finalData.competences.join('  |  ') 
+        : finalData.competences;
+      doc.text(competencesText, { indent: 10 });
     } else {
       doc.text('Aucune compétence renseignée', { indent: 10 });
     }
     
-    // Expériences
+    // 💼 EXPÉRIENCES
     if (finalData.experiences && finalData.experiences.length > 0) {
       doc.addPage();
       doc.moveDown();
@@ -111,7 +151,7 @@ const generateStudentCV = async (req, res) => {
       });
     }
     
-    // Formations complémentaires
+    // 📚 FORMATIONS COMPLÉMENTAIRES
     if (finalData.formations && finalData.formations.length > 0) {
       doc.moveDown();
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('FORMATIONS COMPLEMENTAIRES');
@@ -122,32 +162,40 @@ const generateStudentCV = async (req, res) => {
       });
     }
     
-    // Langues
+    // 🗣️ LANGUES
     if (finalData.langues && finalData.langues.length > 0) {
       doc.moveDown();
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('LANGUES');
       doc.fontSize(10).font('Helvetica').fillColor('#666');
-      doc.text(finalData.langues.join('  |  '), { indent: 10 });
+      const languesText = Array.isArray(finalData.langues) 
+        ? finalData.langues.join('  |  ') 
+        : finalData.langues;
+      doc.text(languesText, { indent: 10 });
     }
     
-    // Centres d'intérêt
+    // 🎯 CENTRES D'INTÉRÊT
     if (finalData.centresInteret && finalData.centresInteret.length > 0) {
       doc.moveDown();
       doc.fontSize(12).font('Helvetica-Bold').fillColor('#10b981').text('CENTRES D\'INTERET');
       doc.fontSize(10).font('Helvetica').fillColor('#666');
-      doc.text(finalData.centresInteret.join('  |  '), { indent: 10 });
+      const interetsText = Array.isArray(finalData.centresInteret) 
+        ? finalData.centresInteret.join('  |  ') 
+        : finalData.centresInteret;
+      doc.text(interetsText, { indent: 10 });
     }
     
+    // Terminer le PDF
     doc.end();
     
   } catch (error) {
-    console.error(error);
+    console.error('❌ Erreur generateStudentCV:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-
-// cvController.js
+// ============================================
+// UPLOAD CV
+// ============================================
 const uploadStudentCV = async (req, res) => {
   try {
     console.log("📤 Upload CV - req.file:", req.file);
@@ -163,8 +211,6 @@ const uploadStudentCV = async (req, res) => {
     
     // Supprimer l'ancien CV s'il existe
     if (student.cvPath) {
-      const fs = require('fs');
-      const path = require('path');
       const oldPath = path.join(__dirname, '../uploads/cvs', student.cvPath);
       if (fs.existsSync(oldPath)) {
         fs.unlinkSync(oldPath);
@@ -172,7 +218,7 @@ const uploadStudentCV = async (req, res) => {
       }
     }
     
-    // 🔥 Sauvegarde dans la base de données
+    // Sauvegarde dans la base de données
     await student.update({
       cvPath: req.file.filename,
       cvName: req.file.originalname
@@ -195,7 +241,10 @@ const uploadStudentCV = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-// @desc    Télécharger CV
+
+// ============================================
+// TÉLÉCHARGER CV
+// ============================================
 const downloadStudentCV = async (req, res) => {
   try {
     const student = await Student.findOne({ where: { userId: req.user.id } });
@@ -223,7 +272,9 @@ const downloadStudentCV = async (req, res) => {
   }
 };
 
-// @desc    Supprimer CV
+// ============================================
+// SUPPRIMER CV
+// ============================================
 const deleteStudentCV = async (req, res) => {
   try {
     const student = await Student.findOne({ where: { userId: req.user.id } });
@@ -248,8 +299,6 @@ const deleteStudentCV = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
-
-
 
 module.exports = {
   generateStudentCV,

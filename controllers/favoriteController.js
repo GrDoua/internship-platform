@@ -1,4 +1,4 @@
-const { Favorite, Student, Offer } = require('../models');
+const { Favorite, Student, Offer, Company } = require('../models');
 
 // @desc    Ajouter aux favoris
 // @route   POST /api/students/favorites/:offerId
